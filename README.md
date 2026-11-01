@@ -60,7 +60,7 @@
 /Applications/IG应援.app
 ```
 
-首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.4`（build 16）。
+首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.5`（build 17）。
 
 ## 模型配置与 API Key 安全
 
@@ -88,6 +88,8 @@
 | Anthropic Messages | `POST {BaseURL}/messages` | `x-api-key` + `anthropic-version: 2023-06-01` | `GET {BaseURL}/models?limit=100` |
 
 Anthropic 格式使用顶层 `system` 字段和必填的 `max_tokens`；回复从 `content[].text` 读取。两种格式都强制 JSON 输出，并兼容常见的代码块包裹。
+
+DeepSeek 的 Anthropic Base URL 是 `https://api.deepseek.com/anthropic`；填 OpenAI 根地址 `https://api.deepseek.com` 时，App 会自动补上 `/anthropic`。DeepSeek V4 默认开启思考模式，比分请求会显式关闭 `thinking`，避免推理内容占满输出上限、导致 JSON 被截断。
 
 ### AI 请求与 Token 策略
 

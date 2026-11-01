@@ -16,11 +16,14 @@ enum PredictionClientError: LocalizedError {
         case .noSchedule:
             return "暂无可预测的 IG 赛程。"
         case .badResponse(let message):
-            return "模型返回内容无法解析：\(message)"
+            return "模型返回内容无法解析：\(message)。请检查 API 格式与 Base URL。"
         case .http(let status, let body):
+            if status == 404 && body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "模型接口路径不存在（HTTP 404）。请检查 API 格式与 Base URL；DeepSeek 的 Anthropic 格式应使用 https://api.deepseek.com/anthropic。"
+            }
             return "模型接口返回 HTTP \(status)：\(body)"
         case .malformedJSON:
-            return "模型没有返回有效的 JSON。"
+            return "模型没有返回有效的 JSON（可能被 max_tokens 截断，或模型返回了说明文字）。"
         case .noPredictions:
             return "模型没有返回可用的比分预测。"
         case .transport(let message):
@@ -51,6 +54,12 @@ enum PredictionClient {
             // bounded prevents a chatty model from spending tokens on prose.
             "max_tokens": 256
         ]
+        // DeepSeek V4 enables thinking by default; its reasoning can consume
+        // the entire small output budget before the JSON arrives. This is a
+        // structured extraction, so use non-thinking mode.
+        if isDeepSeek(model) {
+            body["thinking"] = ["type": "disabled"]
+        }
 
         switch model.apiFormat {
         case .openai:
@@ -148,6 +157,10 @@ enum PredictionClient {
         c = IG win probability 0-100. No markdown, no explanation.
         """
         return (system, "IG matches:\n\(lines)")
+    }
+
+    private static func isDeepSeek(_ model: ModelConfig) -> Bool {
+        URL(string: model.baseURL)?.host?.lowercased() == "api.deepseek.com"
     }
 
     private static func authorize(_ request: inout URLRequest,

@@ -240,6 +240,19 @@ struct ModelConfig: Codable, Identifiable, Equatable {
         }
         value = value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         if value.isEmpty { return "" }
+        // DeepSeek exposes Anthropic Messages under /anthropic, not the
+        // OpenAI /v1 root. Accept either the documented base URL or the
+        // OpenAI base URL and normalize it once.
+        if apiFormat == .anthropic,
+           let host = URL(string: value)?.host?.lowercased(),
+           host == "api.deepseek.com" {
+            if value.hasSuffix("/v1") {
+                value = String(value.dropLast(3))
+            }
+            if !value.contains("/anthropic") {
+                value += "/anthropic"
+            }
+        }
         if value.hasSuffix("/v1") || value.contains("/v1/") {
             return value
         }
@@ -253,8 +266,14 @@ struct ModelConfig: Codable, Identifiable, Equatable {
     }
 
     var modelsEndpoint: URL? {
-        let base = normalizedBase
+        var base = normalizedBase
         guard !base.isEmpty else { return nil }
+        // DeepSeek's model catalog lives on the OpenAI-compatible root,
+        // while its Messages API lives under /anthropic.
+        if apiFormat == .anthropic,
+           URL(string: base)?.host?.lowercased() == "api.deepseek.com" {
+            base = base.replacingOccurrences(of: "/anthropic", with: "")
+        }
         return URL(string: base + "/models")
     }
 }
