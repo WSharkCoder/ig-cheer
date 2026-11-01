@@ -116,8 +116,6 @@ enum ModelCatalogClient {
 
         let host = URL(string: model.baseURL)?.host?.lowercased() ?? ""
         if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-            // Generic Ollama / LM Studio examples. The user can replace the
-            // model id with anything their local server reports.
             return ["qwen2.5:7b", "llama3.2:3b", "deepseek-r1:7b"]
         }
         if host.contains("deepseek") {

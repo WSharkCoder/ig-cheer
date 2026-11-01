@@ -44,7 +44,6 @@ enum AppPaths {
 }
 
 enum AppClock {
-    /// Preview/testing hook only. Normal launches use the wall clock.
     static var now: Date {
         if let raw = ProcessInfo.processInfo.environment["IG_CHEER_NOW"],
            let date = ISO8601.date(raw) {
@@ -220,8 +219,7 @@ struct ModelConfig: Codable, Identifiable, Equatable {
         baseURL = try container.decode(String.self, forKey: .baseURL)
         encryptedKey = try container.decodeIfPresent(String.self, forKey: .encryptedKey)
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
-        // Older models.json files have no apiFormat; they were all
-        // OpenAI-compatible before this field was introduced.
+        // Missing apiFormat means an OpenAI-compatible configuration.
         apiFormat = try container.decodeIfPresent(ModelAPIFormat.self, forKey: .apiFormat) ?? .openai
     }
 

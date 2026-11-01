@@ -165,7 +165,7 @@ def main() -> int:
             if '{"__typename":"EventMatch"' in html:
                 break
             last_error = RuntimeError(f"no schedule data in {url}")
-        except Exception as exc:  # noqa: BLE001 - surface network failures plainly
+        except Exception as exc:
             last_error = exc
     if not html:
         print(f"ERROR: could not load lolesports schedule: {last_error}", file=sys.stderr)

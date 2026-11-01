@@ -14,6 +14,8 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     var onClearMyPrediction: ((String) -> Void)?
     var onKeepAlive: (() -> Void)?
     var onDismiss: (() -> Void)?
+    var onMouseEnter: (() -> Void)?
+    var onMouseExit: (() -> Void)?
     var onResize: ((CGFloat) -> Void)?
 
     private let webView: ClickThroughWebView
@@ -22,6 +24,7 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     private var pendingTail: CGFloat?
     private var lastStateJSON: String?
     private var previewMode = false
+    private var trackingArea: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
         let configuration = WKWebViewConfiguration()
@@ -55,6 +58,27 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let area = NSTrackingArea(rect: .zero,
+                                  options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                  owner: self,
+                                  userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        onMouseEnter?()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        onMouseExit?()
     }
 
     deinit {

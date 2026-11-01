@@ -4,7 +4,7 @@ import Cocoa
 
 private let slogan = "IG 加油，冲冲冲！"
 private let loginLabel = "com.wsharkcoder.igcheer"
-private let autoHideInterval: TimeInterval = 20
+private let hideAfterPointerExit: TimeInterval = 10
 
 private let defaultQuotes = [
     "天不生TheShy，\nLPL上单万古如长夜",
@@ -158,6 +158,8 @@ final class DropdownController {
     private var panel: NSPanel?
     private var surface: PanelWebSurface?
     private var hideToken = 0
+    private var hideWorkItem: DispatchWorkItem?
+    private var pointerInside = false
     private var currentMode: PanelMode = .vertical
     private var currentHeight: CGFloat = 983
     private weak var anchorButton: NSStatusBarButton?
@@ -206,6 +208,8 @@ final class DropdownController {
         }
         s.onKeepAlive = { [weak self] in self?.onKeepAlive?() }
         s.onDismiss = { [weak self] in self?.onDismiss?() }
+        s.onMouseEnter = { [weak self] in self?.pointerDidEnter() }
+        s.onMouseExit = { [weak self] in self?.pointerDidExit() }
         s.onResize = { [weak self] height in self?.resize(to: height) }
         p.contentView = s
         panel = p
@@ -238,7 +242,8 @@ final class DropdownController {
             pop.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer.add(pop, forKey: "pop")
         }
-        keepAlive()
+        pointerInside = panel.frame.contains(NSEvent.mouseLocation)
+        refreshHideTimer()
     }
 
     func update(state: PanelState) {
@@ -247,17 +252,42 @@ final class DropdownController {
 
     func keepAlive() {
         guard isVisible else { return }
-        hideToken += 1
+        refreshHideTimer()
+    }
+
+    private func pointerDidEnter() {
+        pointerInside = true
+        cancelHideTimer()
+    }
+
+    private func pointerDidExit() {
+        pointerInside = false
+        refreshHideTimer()
+    }
+
+    private func refreshHideTimer() {
+        cancelHideTimer()
+        guard isVisible, !pointerInside else { return }
         let token = hideToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + autoHideInterval) { [weak self] in
-            guard let self, self.hideToken == token else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.hideToken == token, !self.pointerInside else { return }
             self.hide()
         }
+        hideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + hideAfterPointerExit,
+                                      execute: work)
+    }
+
+    private func cancelHideTimer() {
+        hideToken += 1
+        hideWorkItem?.cancel()
+        hideWorkItem = nil
     }
 
     func hide() {
         guard let panel, panel.isVisible else { return }
-        hideToken += 1
+        cancelHideTimer()
+        pointerInside = false
         NSAnimationContext.runAnimationGroup({ ctx in
             ctx.duration = 0.16
             panel.animator().alphaValue = 0

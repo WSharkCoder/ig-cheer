@@ -20,7 +20,7 @@
         window.webkit.messageHandlers.panel.postMessage({ action, ...extra });
       }
     } catch (_) {
-      // The file also opens in a plain browser for quick design checks.
+      // Ignore browser-only preview calls.
     }
   };
 
