@@ -259,8 +259,8 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         testButton.target = self
         testButton.action = #selector(testConnection)
         testButton.bezelStyle = .rounded
-        testButton.controlSize = .small
-        testButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        testButton.controlSize = .regular
+        testButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         testButton.frame = NSRect(x: 270, y: 78, width: 100, height: 28)
         testButton.toolTip = "GET {Base URL}/models，只验证连通与鉴权，不发送推理请求，不消耗 Token"
         editor.addSubview(testButton)
