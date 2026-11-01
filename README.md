@@ -64,10 +64,10 @@
 
 如果这个小工具让你会心一笑，欢迎扫码支持。感谢每一位喜欢 IG 的朋友。
 
-| 赞赏码 | 僵王博士一只 |
-| :---: | :---: |
-| <img src="docs/reward-qr.png" width="240" alt="赞赏码"> | <img src="docs/dr-zomboss.png" height="240" alt="僵王博士一只"> |
-| 扫码赞赏，感谢支持 | 僵王博士一只 |
+<p align="center">
+  <img src="docs/reward-qr.png" width="260" alt="赞赏码"><br>
+  <sub>扫码赞赏，感谢支持</sub>
+</p>
 
 ## 安装
 
