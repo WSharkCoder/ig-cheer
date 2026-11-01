@@ -5,8 +5,8 @@
 左键点菜单栏图标打开应援面板；右键打开设置菜单。支持纵向长卡与横向仪表盘两种布局，可在菜单中随时切换。
 
 <p align="center">
-  <img src="docs/panel-vertical.png" width="380" alt="纵向长卡界面"><br>
-  <img src="docs/panel-horizontal.png" width="760" alt="横向仪表盘界面">
+  <img src="docs/panel-vertical.png" width="440" alt="纵向长卡界面"><br>
+  <img src="docs/panel-horizontal.png" width="800" alt="横向仪表盘界面">
 </p>
 
 > 预览图为透明背景，不含本机路径或本地模型信息；其中赛程和预测使用演示数据。
