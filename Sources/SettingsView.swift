@@ -210,7 +210,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         keyLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         keyLabel.frame = NSRect(x: 24, y: 229, width: 120, height: 15)
         editor.addSubview(keyLabel)
-        let keyHintLabel = NSTextField(labelWithString: "留空保留现有 Key；保存时加密")
+        let keyHintLabel = NSTextField(labelWithString: "留空保留现有 Key；远程服务需填写，本地可留空")
         keyHintLabel.font = NSFont.systemFont(ofSize: 9)
         keyHintLabel.textColor = .secondaryLabelColor
         keyHintLabel.frame = NSRect(x: 145, y: 229, width: 300, height: 15)
@@ -536,6 +536,19 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
             }
         }
 
+        // Do not send an unauthenticated /models request to a remote
+        // provider: DeepSeek and most hosted APIs answer with a confusing
+        // "missing key" error. Keep the built-in suggestions usable instead.
+        if apiKey == nil && !Self.isLocalEndpoint(base) {
+            let fallback = ModelCatalogClient.suggestions(for: draft)
+            setModelChoices(fallback, preserving: modelCombo.stringValue)
+            statusLabel.stringValue = "未配置 Key · 已显示内置模型"
+            statusLabel.toolTip = "DeepSeek 等远程服务的 /models 需要 API Key；填写后再点「获取模型」。"
+            showAlert(title: "需要 API Key",
+                      message: "远程服务的 /models 需要鉴权。请先在上方填写 API Key；本地服务可以留空。")
+            return
+        }
+
         fetchInFlight = true
         fetchButton.isEnabled = false
         fetchButton.title = "获取中…"
@@ -569,6 +582,20 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private var selectedConfig: ModelConfig? {
         guard let id = selectedID else { return nil }
         return store.models.first(where: { $0.id == id })
+    }
+
+    private static func isLocalEndpoint(_ baseURL: String) -> Bool {
+        guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "知道了")
+        alert.runModal()
     }
 
     private func showError(_ error: Error, title: String = "操作失败") {
