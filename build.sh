@@ -14,14 +14,22 @@ mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 echo "==> Compiling Swift"
 xcrun swiftc -O -swift-version 5 \
   "$ROOT/Sources/main.swift" \
+  "$ROOT/Sources/Models.swift" \
+  "$ROOT/Sources/PredictionClient.swift" \
+  "$ROOT/Sources/PanelWebView.swift" \
+  "$ROOT/Sources/SettingsView.swift" \
   -o "$BIN" \
-  -framework Cocoa
+  -framework Cocoa -framework WebKit -framework Security -framework CryptoKit
 
 echo "==> Bundling resources"
 cp "$ROOT/assets/avatar_bust_white.png" "$CONTENTS/Resources/avatar_bust_white.png"
 cp "$ROOT/assets/MenuIconGrayBust.png" "$CONTENTS/Resources/MenuIconGrayBust.png"
 cp "$ROOT/assets/MenuIconGrayBust@2x.png" "$CONTENTS/Resources/MenuIconGrayBust@2x.png"
 cp "$ROOT/assets/MenuIconGrayBust@3x.png" "$CONTENTS/Resources/MenuIconGrayBust@3x.png"
+cp "$ROOT/Sources/panel.html" "$CONTENTS/Resources/panel.html"
+cp "$ROOT/Sources/panel.css" "$CONTENTS/Resources/panel.css"
+cp "$ROOT/Sources/panel.js" "$CONTENTS/Resources/panel.js"
+cp "$ROOT/tools/fetch_schedule.py" "$CONTENTS/Resources/fetch_schedule.py"
 printf 'APPL????' > "$CONTENTS/PkgInfo"
 
 # App icon (.icns)
@@ -51,9 +59,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.0.5</string>
+    <string>0.1.0</string>
     <key>CFBundleVersion</key>
-    <string>5</string>
+    <string>6</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
@@ -62,6 +70,11 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <key>NSHumanReadableCopyright</key>
     <string>Made with love for Invictus Gaming.</string>
     <key>CFBundleURLTypes</key>

@@ -4,7 +4,7 @@ import Cocoa
 
 private let slogan = "IG 加油，冲冲冲！"
 private let loginLabel = "com.wsharkcoder.igcheer"
-private let panelSize = NSSize(width: 400, height: 380)
+private let autoHideInterval: TimeInterval = 20
 
 private let defaultQuotes = [
     "天不生TheShy，\nLPL上单万古如长夜",
@@ -23,13 +23,7 @@ private enum QuoteStore {
            !custom.isEmpty {
             return URL(fileURLWithPath: custom)
         }
-        let base = FileManager.default.urls(for: .applicationSupportDirectory,
-                                            in: .userDomainMask).first
-            ?? FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return base
-            .appendingPathComponent("IGCheer", isDirectory: true)
-            .appendingPathComponent("quotes.txt")
+        return AppPaths.supportDirectory.appendingPathComponent("quotes.txt")
     }
 
     static func ensureConfigExists() {
@@ -64,8 +58,6 @@ private enum QuoteStore {
             .filter { !$0.isEmpty }
         guard let first = pieces.first else { return "" }
         guard pieces.count > 1 else { return first }
-        // One forced break is enough for the two-line card; fold any extra
-        // separators back into the second line instead of dropping text.
         return first + "\n" + pieces.dropFirst().joined(separator: "，")
     }
 
@@ -83,43 +75,6 @@ private enum QuoteStore {
     五花马千金裘，|多喝几杯不算愁
     一半天使，一半恶魔
     """
-}
-
-private extension NSColor {
-    static let igGreen = NSColor(calibratedRed: 0.247, green: 0.561, blue: 0.310, alpha: 1.0)
-    static let igRed = NSColor(calibratedRed: 0.851, green: 0.220, blue: 0.173, alpha: 1.0)
-    static let ink = NSColor(calibratedRed: 0.078, green: 0.078, blue: 0.078, alpha: 1.0)
-    static let caption = NSColor(calibratedWhite: 0.52, alpha: 1.0)
-    static let hairline = NSColor(calibratedRed: 0.906, green: 0.882, blue: 0.839, alpha: 1.0)
-    static let faint = NSColor(calibratedRed: 0.655, green: 0.631, blue: 0.584, alpha: 1.0)
-    static let navy = NSColor(calibratedRed: 0.082, green: 0.102, blue: 0.125, alpha: 1.0)
-    static let mutedInk = NSColor(calibratedRed: 0.459, green: 0.427, blue: 0.384, alpha: 1.0)
-}
-
-private func resourceImage(_ name: String) -> NSImage? {
-    guard let url = Bundle.main.url(forResource: name, withExtension: "png") else { return nil }
-    return NSImage(contentsOf: url)
-}
-
-/// 22 pt grayscale bust with white/gray texture. PNG reps only; the grain is
-/// raster by design, so 1x/2x/3x cover the menu bar without a blurry upscale.
-private func grayBustMenuImage() -> NSImage? {
-    guard let base = Bundle.main.url(forResource: "MenuIconGrayBust", withExtension: "png") else {
-        return nil
-    }
-    let directory = base.deletingLastPathComponent()
-    let image = NSImage(size: NSSize(width: 22, height: 22))
-    for scale in 1...3 {
-        let name = scale == 1 ? "MenuIconGrayBust.png" : "MenuIconGrayBust@\(scale)x.png"
-        let url = directory.appendingPathComponent(name)
-        if let data = try? Data(contentsOf: url), let rep = NSBitmapImageRep(data: data) {
-            rep.size = NSSize(width: 22, height: 22)
-            image.addRepresentation(rep)
-        }
-    }
-    guard !image.representations.isEmpty else { return nil }
-    image.isTemplate = true
-    return image
 }
 
 // MARK: - Login item (LaunchAgent)
@@ -166,289 +121,34 @@ enum LoginItem {
     }
 }
 
-// MARK: - Dropdown view (V1 名片式)
+// MARK: - Panel mode
 
-final class DropdownView: NSView {
-    var tailX: CGFloat = 190
-    var onDismiss: (() -> Void)?
-    var onInteraction: (() -> Void)?
+enum PanelMode: String, CaseIterable {
+    case vertical
+    case horizontal
 
-    private let avatar = resourceImage("avatar_bust_white")
-    private var quotes = defaultQuotes
-    private var quoteIndex = 0
-    private var liked = false
-    private var toastVisible = false
-    private var toastToken = 0
-    private var ctaRect = NSRect.zero
-    private var nextRect = NSRect.zero
-
-    func reloadQuotes() {
-        quotes = QuoteStore.load()
-        if quoteIndex >= quotes.count {
-            quoteIndex = 0
+    var title: String {
+        switch self {
+        case .vertical: return "纵向长卡"
+        case .horizontal: return "横向仪表盘"
         }
-        needsDisplay = true
+    }
+}
+
+enum PanelMetrics {
+    static func initialSize(for mode: PanelMode) -> NSSize {
+        switch mode {
+        case .vertical: return NSSize(width: 440, height: 983)
+        case .horizontal: return NSSize(width: 800, height: 502)
+        }
     }
 
-    func resetInteraction() {
-        liked = false
-        toastVisible = false
-        quoteIndex = 0
-        toastToken += 1
-        needsDisplay = true
+    static func minHeight(for mode: PanelMode) -> CGFloat {
+        mode == .vertical ? 560 : 430
     }
 
-    private func drawText(_ text: String,
-                          in rect: NSRect,
-                          font: NSFont,
-                          color: NSColor,
-                          alignment: NSTextAlignment = .left,
-                          lineSpacing: CGFloat = 0,
-                          kern: CGFloat = 0) {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = alignment
-        paragraph.lineSpacing = lineSpacing
-        paragraph.lineBreakMode = .byWordWrapping
-        var attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: color,
-            .paragraphStyle: paragraph
-        ]
-        if kern != 0 { attrs[.kern] = kern }
-        (text as NSString).draw(in: rect, withAttributes: attrs)
-    }
-
-    private func cycleQuote() {
-        guard quotes.count > 1 else { return }
-        quoteIndex = (quoteIndex + 1) % quotes.count
-        needsDisplay = true
-        onInteraction?()
-    }
-
-    private func like() {
-        guard !liked else { return }
-        liked = true
-        toastVisible = true
-        toastToken += 1
-        let token = toastToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) { [weak self] in
-            guard let self, self.toastToken == token else { return }
-            self.toastVisible = false
-            self.needsDisplay = true
-        }
-        needsDisplay = true
-        onInteraction?()
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-
-        let card = NSRect(x: 10, y: 8, width: bounds.width - 20, height: bounds.height - 16)
-        let cardPath = NSBezierPath(roundedRect: card, xRadius: 24, yRadius: 24)
-
-        // upward tail, so the popup feels attached to the menu bar icon
-        let tx = min(max(tailX, 34), bounds.width - 34)
-        let tail = NSBezierPath()
-        tail.move(to: NSPoint(x: tx - 13, y: card.maxY - 1))
-        tail.line(to: NSPoint(x: tx, y: bounds.maxY - 0.5))
-        tail.line(to: NSPoint(x: tx + 13, y: card.maxY - 1))
-        tail.close()
-
-        let shape = NSBezierPath()
-        shape.append(cardPath)
-        shape.append(tail)
-
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -5), blur: 18,
-                      color: NSColor.black.withAlphaComponent(0.22).cgColor)
-        NSColor.white.setFill()
-        shape.fill()
-        ctx.restoreGState()
-
-        NSColor.black.withAlphaComponent(0.05).setStroke()
-        cardPath.lineWidth = 1
-        cardPath.stroke()
-
-        let contentX: CGFloat = 32
-        let contentW = card.width - 44
-        let top = card.maxY - 22
-        let avatarRect = NSRect(x: contentX, y: top - 104, width: 104, height: 104)
-
-        // dark rounded avatar tile with the full gray flag-bearer
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -4), blur: 12,
-                      color: NSColor.black.withAlphaComponent(0.18).cgColor)
-        NSColor.navy.setFill()
-        NSBezierPath(roundedRect: avatarRect, xRadius: 24, yRadius: 24).fill()
-        ctx.restoreGState()
-
-        NSGraphicsContext.saveGraphicsState()
-        NSBezierPath(roundedRect: avatarRect, xRadius: 24, yRadius: 24).addClip()
-        if let avatar {
-            avatar.draw(in: avatarRect.insetBy(dx: 3, dy: 3),
-                        from: .zero, operation: .sourceOver, fraction: 1)
-        }
-        NSGraphicsContext.restoreGraphicsState()
-
-        NSColor.white.withAlphaComponent(0.13).setStroke()
-        let avatarBorder = NSBezierPath(roundedRect: avatarRect.insetBy(dx: 0.5, dy: 0.5),
-                                        xRadius: 23.5, yRadius: 23.5)
-        avatarBorder.lineWidth = 1
-        avatarBorder.stroke()
-
-        NSColor.igRed.withAlphaComponent(0.18).setFill()
-        NSBezierPath(ovalIn: NSRect(x: avatarRect.maxX - 18, y: avatarRect.maxY - 18,
-                                    width: 12, height: 12)).fill()
-        NSColor.igRed.setFill()
-        NSBezierPath(ovalIn: NSRect(x: avatarRect.maxX - 15, y: avatarRect.maxY - 15,
-                                    width: 6, height: 6)).fill()
-
-        let copyX = avatarRect.maxX + 16
-        let copyW = card.maxX - 22 - copyX
-
-        drawText("THE SHY · 应援模式",
-                 in: NSRect(x: copyX, y: top - 12, width: copyW, height: 12),
-                 font: NSFont.systemFont(ofSize: 9.5, weight: .bold),
-                 color: .igRed, kern: 1.25)
-
-        drawText("IG 加油，\n冲冲冲！",
-                 in: NSRect(x: copyX, y: top - 76, width: copyW, height: 60),
-                 font: NSFont.systemFont(ofSize: 27, weight: .heavy),
-                 color: .ink)
-
-        let statusY = top - 96
-        NSColor.igGreen.setFill()
-        NSBezierPath(ovalIn: NSRect(x: copyX, y: statusY + 3, width: 6, height: 6)).fill()
-        drawText("应援中",
-                 in: NSRect(x: copyX + 12, y: statusY - 1, width: 40, height: 12),
-                 font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                 color: .igGreen)
-        drawText("/",
-                 in: NSRect(x: copyX + 52, y: statusY - 1, width: 8, height: 12),
-                 font: NSFont.systemFont(ofSize: 10, weight: .regular),
-                 color: .hairline)
-        drawText("INVICTUS GAMING",
-                 in: NSRect(x: copyX + 62, y: statusY, width: 145, height: 11),
-                 font: NSFont.systemFont(ofSize: 8.5, weight: .medium),
-                 color: .caption, kern: 1.2)
-
-        let ruleY = top - 122
-        NSColor.hairline.setFill()
-        NSRect(x: contentX, y: ruleY, width: contentW, height: 1).fill()
-
-        let sectionY = ruleY - 26
-        drawText("今日金句",
-                 in: NSRect(x: contentX, y: sectionY, width: 160, height: 12),
-                 font: NSFont.systemFont(ofSize: 9.5, weight: .bold),
-                 color: NSColor(calibratedRed: 0.549, green: 0.518, blue: 0.467, alpha: 1),
-                 kern: 1.4)
-        drawText(String(format: "%02d / %02d", quoteIndex + 1, quotes.count),
-                 in: NSRect(x: card.maxX - 22 - 108, y: sectionY, width: 108, height: 12),
-                 font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular),
-                 color: NSColor(calibratedRed: 0.698, green: 0.663, blue: 0.604, alpha: 1),
-                 alignment: .right, kern: 0.6)
-
-        let quoteRect = NSRect(x: contentX, y: sectionY - 70, width: contentW,
-                               height: quotes[quoteIndex].contains("\n") ? 60 : 44)
-        drawText(quotes[quoteIndex],
-                 in: quoteRect,
-                 font: NSFont(name: "Songti SC Bold", size: 19)
-                    ?? NSFont.systemFont(ofSize: 19, weight: .semibold),
-                 color: .ink, lineSpacing: 4)
-
-        let footY = quoteRect.minY - 22
-        if quotes.count > 1 {
-            if quotes.count <= 12 {
-                var dotX = contentX
-                for index in quotes.indices {
-                    let active = index == quoteIndex
-                    let width: CGFloat = active ? 14 : 4
-                    (active ? NSColor.igRed : NSColor(calibratedWhite: 0.85, alpha: 1)).setFill()
-                    NSBezierPath(roundedRect: NSRect(x: dotX, y: footY + 6, width: width, height: 4),
-                                 xRadius: 2, yRadius: 2).fill()
-                    dotX += width + 5
-                }
-            }
-
-            nextRect = NSRect(x: card.maxX - 22 - 96, y: footY - 2, width: 96, height: 22)
-            drawText("换一句  ↻",
-                     in: NSRect(x: nextRect.minX, y: footY + 5, width: 96, height: 14),
-                     font: NSFont.systemFont(ofSize: 10, weight: .regular),
-                     color: .mutedInk, alignment: .right)
-        } else {
-            nextRect = .zero
-        }
-
-        ctaRect = NSRect(x: contentX, y: 42, width: contentW, height: 51)
-        let ctaColor = liked ? NSColor.igGreen : NSColor.ink
-        ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -4), blur: 12,
-                      color: NSColor.black.withAlphaComponent(0.18).cgColor)
-        ctaColor.setFill()
-        NSBezierPath(roundedRect: ctaRect, xRadius: 14, yRadius: 14).fill()
-        ctx.restoreGState()
-
-        drawText(liked ? "点赞成功" : "点赞应援",
-                 in: NSRect(x: ctaRect.minX + 15, y: ctaRect.minY + 21, width: 220, height: 17),
-                 font: NSFont.systemFont(ofSize: 14, weight: .bold),
-                 color: .white)
-        drawText(liked ? "IG 加油！" : "给 IG 加油",
-                 in: NSRect(x: ctaRect.minX + 15, y: ctaRect.minY + 10, width: 220, height: 11),
-                 font: NSFont.systemFont(ofSize: 9.5, weight: .regular),
-                 color: NSColor.white.withAlphaComponent(0.62))
-
-        let plusRect = NSRect(x: ctaRect.maxX - 42, y: ctaRect.minY + 12,
-                              width: 27, height: 27)
-        (liked ? NSColor.white : NSColor.igRed).setFill()
-        NSBezierPath(ovalIn: plusRect).fill()
-        drawText("+1",
-                 in: plusRect.insetBy(dx: 0, dy: 6),
-                 font: NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .bold),
-                 color: liked ? NSColor.igGreen : NSColor.white,
-                 alignment: .center)
-
-        if !toastVisible {
-            drawText("点一下，为 The Shy 加一份士气",
-                     in: NSRect(x: contentX, y: 24, width: contentW, height: 11),
-                     font: NSFont.systemFont(ofSize: 9, weight: .regular),
-                     color: .faint, alignment: .center)
-        }
-
-        if toastVisible {
-            let toastFont = NSFont.systemFont(ofSize: 10, weight: .medium)
-            let toastText = "点赞成功 · IG 加油！"
-            let textWidth = (toastText as NSString).size(withAttributes: [.font: toastFont]).width
-            let toastRect = NSRect(x: bounds.midX - (textWidth + 24) / 2,
-                                   y: 10, width: textWidth + 24, height: 22)
-            NSColor.navy.setFill()
-            NSBezierPath(roundedRect: toastRect, xRadius: 11, yRadius: 11).fill()
-            drawText(toastText,
-                     in: NSRect(x: toastRect.minX + 12, y: toastRect.minY + 6,
-                                width: textWidth, height: 12),
-                     font: toastFont, color: .white, alignment: .center)
-        }
-
-        window?.invalidateCursorRects(for: self)
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        if ctaRect.contains(point) {
-            like()
-            return
-        }
-        if nextRect.contains(point) {
-            cycleQuote()
-            return
-        }
-        onDismiss?()
-    }
-
-    override func resetCursorRects() {
-        super.resetCursorRects()
-        if !ctaRect.isEmpty { addCursorRect(ctaRect, cursor: .pointingHand) }
-        if !nextRect.isEmpty { addCursorRect(nextRect, cursor: .pointingHand) }
+    static func maxHeight(for mode: PanelMode) -> CGFloat {
+        mode == .vertical ? 1240 : 760
     }
 }
 
@@ -456,12 +156,26 @@ final class DropdownView: NSView {
 
 final class DropdownController {
     private var panel: NSPanel?
-    private var view: DropdownView?
+    private var surface: PanelWebSurface?
     private var hideToken = 0
+    private var currentMode: PanelMode = .vertical
+    private var currentHeight: CGFloat = 983
+    private weak var anchorButton: NSStatusBarButton?
+    private var panelTop: CGFloat = 0
+
+    var onLike: (() -> Void)?
+    var onNextQuote: (() -> Void)?
+    var onOpenModels: (() -> Void)?
+    var onDismiss: (() -> Void)?
+
+    var isVisible: Bool {
+        panel?.isVisible == true
+    }
 
     private func makePanelIfNeeded() -> NSPanel {
         if let panel { return panel }
-        let p = NSPanel(contentRect: NSRect(origin: .zero, size: panelSize),
+        let size = PanelMetrics.initialSize(for: currentMode)
+        let p = NSPanel(contentRect: NSRect(origin: .zero, size: size),
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
         p.isOpaque = false
@@ -469,74 +183,61 @@ final class DropdownController {
         p.hasShadow = false
         p.level = .statusBar
         p.isMovable = false
+        p.isMovableByWindowBackground = false
         p.hidesOnDeactivate = false
         p.becomesKeyOnlyIfNeeded = true
         p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         p.animationBehavior = .none
 
-        let v = DropdownView(frame: NSRect(origin: .zero, size: panelSize))
-        v.wantsLayer = true
-        v.onDismiss = { [weak self] in self?.hide() }
-        v.onInteraction = { [weak self] in self?.keepAlive() }
-        p.contentView = v
+        let s = PanelWebSurface(frame: NSRect(origin: .zero, size: size))
+        s.onLike = { [weak self] in self?.onLike?() }
+        s.onNextQuote = { [weak self] in self?.onNextQuote?() }
+        s.onOpenModels = { [weak self] in self?.onOpenModels?() }
+        s.onDismiss = { [weak self] in self?.onDismiss?() }
+        s.onResize = { [weak self] height in self?.resize(to: height) }
+        p.contentView = s
         panel = p
-        view = v
+        surface = s
         return p
     }
 
-    func show(anchor button: NSStatusBarButton?) {
+    func show(anchor button: NSStatusBarButton?, mode: PanelMode, state: PanelState) {
         let panel = makePanelIfNeeded()
-        guard let screen = button?.window?.screen ?? NSScreen.main else { return }
-
-        var originX = screen.visibleFrame.midX - panelSize.width / 2
-        var originY = screen.visibleFrame.maxY - panelSize.height - 4
-        var anchorMidX = screen.visibleFrame.midX
-        if let button, let window = button.window {
-            let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
-            anchorMidX = rect.midX
-            originX = rect.midX - panelSize.width / 2
-            originY = rect.minY - panelSize.height - 4
-        }
-        let minX = screen.visibleFrame.minX + 8
-        let maxX = screen.visibleFrame.maxX - panelSize.width - 8
-        originX = min(max(originX, minX), max(minX, maxX))
-
-        view?.tailX = min(max(anchorMidX - originX, 34), panelSize.width - 34)
-        view?.reloadQuotes()
-        view?.resetInteraction()
-        view?.needsDisplay = true
-
-        panel.setFrame(NSRect(x: originX, y: originY, width: panelSize.width, height: panelSize.height),
-                       display: true)
+        currentMode = mode
+        anchorButton = button
+        currentHeight = PanelMetrics.initialSize(for: mode).height
+        let frame = frameForCurrentPanel()
+        panel.setFrame(frame, display: false)
+        panelTop = frame.maxY
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        surface?.setState(state)
+        updateTail()
 
+        panel.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { ctx in
             ctx.duration = 0.18
             panel.animator().alphaValue = 1
         }
         if let layer = panel.contentView?.layer {
             let pop = CAKeyframeAnimation(keyPath: "transform.scale")
-            pop.values = [0.94, 1.012, 1.0]
-            pop.keyTimes = [0, 0.7, 1]
-            pop.duration = 0.26
+            pop.values = [0.96, 1.008, 1.0]
+            pop.keyTimes = [0, 0.72, 1]
+            pop.duration = 0.24
             pop.timingFunction = CAMediaTimingFunction(name: .easeOut)
             layer.add(pop, forKey: "pop")
         }
+        keepAlive()
+    }
 
-        hideToken += 1
-        let token = hideToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
-            guard let self, self.hideToken == token else { return }
-            self.hide()
-        }
+    func update(state: PanelState) {
+        surface?.setState(state)
     }
 
     func keepAlive() {
-        guard let panel, panel.isVisible else { return }
+        guard isVisible else { return }
         hideToken += 1
         let token = hideToken
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + autoHideInterval) { [weak self] in
             guard let self, self.hideToken == token else { return }
             self.hide()
         }
@@ -546,11 +247,64 @@ final class DropdownController {
         guard let panel, panel.isVisible else { return }
         hideToken += 1
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.18
+            ctx.duration = 0.16
             panel.animator().alphaValue = 0
         }, completionHandler: {
             panel.orderOut(nil)
         })
+    }
+
+    private func resize(to height: CGFloat) {
+        guard let panel else { return }
+        let clamped = min(max(height, PanelMetrics.minHeight(for: currentMode)),
+                          PanelMetrics.maxHeight(for: currentMode))
+        guard abs(clamped - currentHeight) > 0.5 else { return }
+        currentHeight = clamped
+        var frame = panel.frame
+        frame.origin.y = panelTop - clamped
+        frame.size.height = clamped
+        if let screen = anchorButton?.window?.screen ?? NSScreen.main {
+            let visible = screen.visibleFrame
+            if frame.minY < visible.minY + 4 {
+                frame.origin.y = visible.minY + 4
+            }
+            if frame.maxY > visible.maxY - 4 {
+                frame.origin.y = visible.maxY - 4 - clamped
+            }
+        }
+        panel.setFrame(frame, display: true)
+        panelTop = frame.maxY
+        updateTail()
+    }
+
+    private func frameForCurrentPanel() -> NSRect {
+        let size = NSSize(width: PanelMetrics.initialSize(for: currentMode).width,
+                          height: currentHeight)
+        guard let screen = anchorButton?.window?.screen ?? NSScreen.main else {
+            return NSRect(origin: .zero, size: size)
+        }
+        var originX = screen.visibleFrame.midX - size.width / 2
+        var originY = screen.visibleFrame.maxY - size.height - 4
+        if let button = anchorButton, let window = button.window {
+            let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
+            originX = rect.midX - size.width / 2
+            originY = rect.minY - size.height - 4
+        }
+        let visible = screen.visibleFrame
+        let minX = visible.minX + 8
+        let maxX = visible.maxX - size.width - 8
+        originX = min(max(originX, minX), max(minX, maxX))
+        originY = max(originY, visible.minY + 4)
+        return NSRect(x: originX, y: originY, width: size.width, height: size.height)
+    }
+
+    private func updateTail() {
+        guard let panel, let button = anchorButton, let window = button.window else { return }
+        let rect = window.convertToScreen(button.convert(button.bounds, to: nil))
+        // The CSS card starts 20 px inside the transparent window; tail is
+        // positioned relative to the card itself.
+        let tail = rect.midX - panel.frame.minX - 20
+        surface?.setTail(x: min(max(tail, 28), panel.frame.width - 48))
     }
 }
 
@@ -560,12 +314,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
     private let dropdown = DropdownController()
     private var menu: NSMenu!
+    private var quotes = defaultQuotes
+    private var quoteIndex = 0
+    private var currentMode: PanelMode = .vertical
+    private var currentSchedule: LoadedSchedule?
+    private var toastText: String?
+    private var toastToken = 0
+    private var predictionRefreshInFlight = false
+    private var modelSettingsWindow: ModelSettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        AppPaths.ensureSupportDirectory()
         QuoteStore.ensureConfigExists()
+        currentMode = PanelMode(rawValue: UserDefaults.standard.string(forKey: "panelMode") ?? "")
+            ?? .vertical
         buildStatusItem()
         buildMenu()
+        configureDropdown()
 
         if !UserDefaults.standard.bool(forKey: "hasLaunched") {
             UserDefaults.standard.set(true, forKey: "hasLaunched")
@@ -574,6 +340,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         handleLaunchArguments()
+    }
+
+    private func configureDropdown() {
+        dropdown.onLike = { [weak self] in self?.handleLike() }
+        dropdown.onNextQuote = { [weak self] in self?.cycleQuote() }
+        dropdown.onOpenModels = { [weak self] in self?.openModelSettings() }
+        dropdown.onDismiss = { [weak self] in self?.dropdown.hide() }
     }
 
     private func buildStatusItem() {
@@ -589,10 +362,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func applyMenuIcon() {
-        guard let button = statusItem.button, let image = grayBustMenuImage() else { return }
-        image.size = NSSize(width: 22, height: 22)
+        guard let button = statusItem.button,
+              let base = Bundle.main.url(forResource: "MenuIconGrayBust", withExtension: "png") else {
+            return
+        }
+        let directory = base.deletingLastPathComponent()
+        let image = NSImage(size: NSSize(width: 22, height: 22))
+        for scale in 1...3 {
+            let name = scale == 1 ? "MenuIconGrayBust.png" : "MenuIconGrayBust@\(scale)x.png"
+            let url = directory.appendingPathComponent(name)
+            if let data = try? Data(contentsOf: url), let rep = NSBitmapImageRep(data: data) {
+                rep.size = NSSize(width: 22, height: 22)
+                image.addRepresentation(rep)
+            }
+        }
+        guard !image.representations.isEmpty else { return }
         image.isTemplate = true
         button.image = image
+        image.size = NSSize(width: 22, height: 22)
         button.imageScaling = .scaleProportionallyDown
     }
 
@@ -600,9 +387,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu = NSMenu()
         menu.autoenablesItems = false
 
-        let cheerItem = NSMenuItem(title: "再喊一次：\(slogan)", action: #selector(cheerAction), keyEquivalent: "")
+        let cheerItem = NSMenuItem(title: "打开应援面板", action: #selector(cheerAction), keyEquivalent: "")
         cheerItem.target = self
         menu.addItem(cheerItem)
+        menu.addItem(.separator())
+
+        let modeItem = NSMenuItem(title: "展示模式", action: nil, keyEquivalent: "")
+        let modeMenu = NSMenu()
+        for mode in PanelMode.allCases {
+            let item = NSMenuItem(title: mode.title,
+                                  action: #selector(selectMode(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = mode.rawValue
+            item.state = currentMode == mode ? .on : .off
+            modeMenu.addItem(item)
+        }
+        modeItem.submenu = modeMenu
+        menu.addItem(modeItem)
+
+        let modelsItem = NSMenuItem(title: "预测模型", action: nil, keyEquivalent: "")
+        let modelsMenu = NSMenu()
+        for config in ModelStore.shared.models {
+            let item = NSMenuItem(title: "\(config.name)  ·  \(config.model)",
+                                  action: #selector(selectModel(_:)),
+                                  keyEquivalent: "")
+            item.target = self
+            item.representedObject = config.id
+            item.state = ModelStore.shared.activeModelID == config.id ? .on : .off
+            modelsMenu.addItem(item)
+        }
+        if modelsMenu.items.isEmpty {
+            let empty = NSMenuItem(title: "尚未配置模型", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            modelsMenu.addItem(empty)
+        }
+        modelsMenu.addItem(.separator())
+        let settingsItem = NSMenuItem(title: "模型配置…", action: #selector(openModelSettingsAction), keyEquivalent: "")
+        settingsItem.target = self
+        modelsMenu.addItem(settingsItem)
+        modelsItem.submenu = modelsMenu
+        menu.addItem(modelsItem)
+
+        menu.addItem(.separator())
+
+        let scheduleItem = NSMenuItem(title: "刷新赛程（官网 · 无需 Token）",
+                                      action: #selector(refreshScheduleAction), keyEquivalent: "")
+        scheduleItem.target = self
+        menu.addItem(scheduleItem)
+
+        let predictionItem = NSMenuItem(title: "刷新 AI 比分预测",
+                                        action: #selector(refreshPredictionAction), keyEquivalent: "")
+        predictionItem.target = self
+        menu.addItem(predictionItem)
         menu.addItem(.separator())
 
         let loginItem = NSMenuItem(title: "登录时自动启动", action: #selector(toggleLogin), keyEquivalent: "")
@@ -631,24 +468,300 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             || event?.modifierFlags.contains(.control) == true
             || event?.modifierFlags.contains(.option) == true
         if wantsMenu {
-            menu.item(withTag: 102)?.state = LoginItem.isEnabled ? .on : .off
+            buildMenu()
             menu.popUp(positioning: nil,
                        at: NSPoint(x: 0, y: sender.bounds.height + 5),
                        in: sender)
         } else {
-            cheer()
+            if dropdown.isVisible { dropdown.hide() } else { cheer() }
         }
     }
 
     @objc private func cheerAction() { cheer() }
 
-    func cheer() {
-        dropdown.show(anchor: statusItem.button)
+    private func cheer() {
+        quotes = QuoteStore.load()
+        if quoteIndex >= quotes.count { quoteIndex = 0 }
+        currentSchedule = ScheduleStore.load()
+        let state = buildState(toast: nil)
+        dropdown.show(anchor: statusItem.button, mode: currentMode, state: state)
+        refreshPredictions(force: false, userInitiated: false)
+    }
+
+    @objc private func selectMode(_ sender: NSMenuItem) {
+        guard let raw = sender.representedObject as? String,
+              let mode = PanelMode(rawValue: raw), mode != currentMode else { return }
+        currentMode = mode
+        UserDefaults.standard.set(mode.rawValue, forKey: "panelMode")
+        let wasVisible = dropdown.isVisible
+        dropdown.hide()
+        if wasVisible {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                self?.cheer()
+            }
+        }
+    }
+
+    @objc private func selectModel(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String else { return }
+        ModelStore.shared.setActive(id)
+        buildMenu()
+        if dropdown.isVisible {
+            dropdown.update(state: buildState(toast: toastText))
+            refreshPredictions(force: true, userInitiated: false)
+        }
+    }
+
+    @objc private func openModelSettingsAction() { openModelSettings() }
+
+    private func openModelSettings() {
+        dropdown.hide()
+        if modelSettingsWindow == nil {
+            let controller = ModelSettingsWindowController()
+            controller.onClose = { [weak self] in
+                guard let self else { return }
+                self.buildMenu()
+                if self.dropdown.isVisible {
+                    self.dropdown.update(state: self.buildState(toast: nil))
+                    self.refreshPredictions(force: true, userInitiated: false)
+                }
+            }
+            modelSettingsWindow = controller
+        }
+        modelSettingsWindow?.show()
+    }
+
+    @objc private func refreshScheduleAction() {
+        refreshSchedule()
+    }
+
+    @objc private func refreshPredictionAction() {
+        if !dropdown.isVisible { cheer() }
+        refreshPredictions(force: true, userInitiated: true)
+    }
+
+    private func refreshSchedule() {
+        let script = Bundle.main.path(forResource: "fetch_schedule", ofType: "py")
+            ?? "\(FileManager.default.currentDirectoryPath)/tools/fetch_schedule.py"
+        guard FileManager.default.fileExists(atPath: script) else {
+            showAlert(title: "找不到赛程脚本", message: "打包资源中缺少 fetch_schedule.py。")
+            return
+        }
+        AppPaths.ensureSupportDirectory()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        task.arguments = ["python3", script, "--out", AppPaths.scheduleURL.path]
+        let pipe = Pipe()
+        task.standardError = pipe
+        task.standardOutput = pipe
+        task.terminationHandler = { [weak self] process in
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let output = String(data: data, encoding: .utf8) ?? ""
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if process.terminationStatus == 0 {
+                    self.currentSchedule = ScheduleStore.load()
+                    if self.dropdown.isVisible {
+                        self.dropdown.update(state: self.buildState(toast: "赛程已刷新"))
+                        self.clearToast(after: 2.0)
+                    } else {
+                        self.cheer()
+                    }
+                } else {
+                    self.showAlert(title: "刷新赛程失败",
+                                   message: output.isEmpty ? "官网暂时不可用，请稍后再试。" : output)
+                }
+            }
+        }
+        do {
+            try task.run()
+        } catch {
+            showAlert(title: "无法运行赛程脚本", message: error.localizedDescription)
+        }
+    }
+
+    private func refreshPredictions(force: Bool, userInitiated: Bool) {
+        guard let model = ModelStore.shared.activeModel else {
+            if userInitiated { showAlert(title: "还没有模型", message: "请先在「模型配置」中添加一套模型。") }
+            return
+        }
+        let schedule = currentSchedule ?? ScheduleStore.load()
+        let upcoming = ScheduleStore.upcoming(from: schedule, limit: 3)
+        guard !upcoming.isEmpty else {
+            if userInitiated { showAlert(title: "暂无待预测赛程", message: "官网赛程里还没有 IG 的下一场比赛。") }
+            return
+        }
+        let local = Self.isLocalEndpoint(model.baseURL)
+        var apiKey: String?
+        do {
+            apiKey = try ModelStore.shared.apiKey(for: model)
+        } catch {
+            if userInitiated {
+                showAlert(title: "读取加密 Key 失败", message: error.localizedDescription)
+            }
+            return
+        }
+        guard local || apiKey != nil else {
+            if userInitiated {
+                showAlert(title: "尚未配置 API Key",
+                          message: "右键「模型配置…」填写 Key 后，才能请求真实模型。当前展示示例预测。")
+            }
+            return
+        }
+        if predictionRefreshInFlight { return }
+
+        if !force, let cached = PredictionStore.load(),
+           cached.modelID == model.model,
+           cached.isFresh,
+           upcoming.allSatisfy({ match in cached.predictions.contains(where: { $0.matchID == match.id }) }) {
+            dropdown.update(state: buildState(toast: toastText))
+            return
+        }
+
+        predictionRefreshInFlight = true
+        PredictionClient.fetch(model: model, apiKey: apiKey, matches: upcoming) { [weak self] result in
+            guard let self else { return }
+            self.predictionRefreshInFlight = false
+            switch result {
+            case .success(let predictions):
+                PredictionStore.save(predictions, model: model)
+                if self.dropdown.isVisible {
+                    self.dropdown.update(state: self.buildState(toast: "AI 预测已更新"))
+                    self.clearToast(after: 2.0)
+                }
+            case .failure(let error):
+                NSLog("IGCheer prediction error: \(error.localizedDescription)")
+                if userInitiated {
+                    self.showAlert(title: "AI 预测失败", message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    private func handleLike() {
+        if CheerStore.markToday() {
+            toastText = "点赞成功 · IG 加油！"
+        } else {
+            toastText = "今天已经应援过了"
+        }
+        dropdown.update(state: buildState(toast: toastText))
+        dropdown.keepAlive()
+        clearToast(after: 2.0)
+    }
+
+    private func cycleQuote() {
+        guard quotes.count > 1 else { return }
+        quoteIndex = (quoteIndex + 1) % quotes.count
+        dropdown.update(state: buildState(toast: toastText))
+        dropdown.keepAlive()
+    }
+
+    private func clearToast(after delay: TimeInterval) {
+        toastToken += 1
+        let token = toastToken
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.toastToken == token else { return }
+            self.toastText = nil
+            if self.dropdown.isVisible {
+                self.dropdown.update(state: self.buildState(toast: nil))
+            }
+        }
+    }
+
+    private func buildState(toast: String?) -> PanelState {
+        let dates = CheerStore.load()
+        let now = AppClock.now
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        let components = calendar.dateComponents([.year, .month, .day], from: now)
+        let year = components.year ?? 2026
+        let month = components.month ?? 1
+        let today = components.day ?? 1
+        let likedDays = CheerStore.monthLikedDays(year: year, month: month, dates: dates)
+        let likedToday = dates.contains(CheerStore.dateKey(for: now))
+
+        let schedule = currentSchedule ?? ScheduleStore.load()
+        let upcoming = ScheduleStore.upcoming(from: schedule, limit: 3)
+        let recent = ScheduleStore.recentCompleted(from: schedule, limit: 3)
+        var scheduleMatches = upcoming + recent
+        if scheduleMatches.count > 3 { scheduleMatches = Array(scheduleMatches.prefix(3)) }
+        var scheduleRows: [PanelScheduleRow] = []
+        for (index, match) in scheduleMatches.enumerated() {
+            let parts = DisplayFormat.dateParts(match.startDate)
+            scheduleRows.append(PanelScheduleRow(
+                id: match.id,
+                dateText: parts.date,
+                weekday: parts.weekday,
+                timeText: parts.time,
+                opponent: match.opponent?.code ?? "TBD",
+                stage: DisplayFormat.stage(match.stage),
+                bestOf: max(match.bestOf, 1),
+                next: index == 0 && !match.isCompleted,
+                completed: match.isCompleted,
+                scoreText: match.scoreText
+            ))
+        }
+
+        let model = ModelStore.shared.activeModel
+        let cached = PredictionStore.load()
+        let ids = Set(upcoming.map(\.id))
+        let cacheUsable = cached != nil
+            && cached?.modelID == model?.model
+            && (cached?.predictions.isEmpty == false)
+            && ids.allSatisfy { id in cached?.predictions.contains(where: { $0.matchID == id }) == true }
+        let predictionSeed = cacheUsable ? (cached?.predictions ?? []) : PredictionStore.sample(
+            for: upcoming,
+            modelName: model?.name ?? "示例预测"
+        )
+        let predictionSample = !cacheUsable
+        var predictionRows: [PanelPredictionRow] = []
+        for match in upcoming {
+            guard let prediction = predictionSeed.first(where: { $0.matchID == match.id }) else { continue }
+            let parts = DisplayFormat.dateParts(match.startDate)
+            predictionRows.append(PanelPredictionRow(
+                matchID: match.id,
+                opponent: match.opponent?.code ?? "TBD",
+                stage: DisplayFormat.stage(match.stage),
+                dateText: parts.date,
+                igScore: prediction.igScore,
+                opponentScore: prediction.opponentScore,
+                confidence: prediction.confidence
+            ))
+        }
+
+        let configured = model.map { $0.hasKey || Self.isLocalEndpoint($0.baseURL) } ?? false
+        let source = schedule.isSample
+            ? "lolesports.com · 示例"
+            : "lolesports.com · 官网"
+        return PanelState(
+            mode: currentMode.rawValue,
+            quote: quotes.isEmpty ? "" : quotes[min(quoteIndex, quotes.count - 1)],
+            quoteIndex: quotes.isEmpty ? 0 : min(quoteIndex, quotes.count - 1),
+            quoteCount: quotes.count,
+            likedToday: likedToday,
+            streak: CheerStore.streak(dates: dates),
+            calendar: PanelCalendarState(year: year, month: month, today: today, likedDays: likedDays),
+            schedule: scheduleRows,
+            predictions: predictionRows,
+            modelName: model?.name ?? "未配置模型",
+            modelID: model?.model ?? "sample",
+            modelConfigured: configured,
+            predictionSample: predictionSample,
+            scheduleSample: schedule.isSample,
+            scheduleSource: source,
+            scheduleUpdated: schedule.isSample ? "示例数据" : DisplayFormat.relativeUpdated(schedule.fetchedAt),
+            toast: toast
+        )
+    }
+
+    private static func isLocalEndpoint(_ baseURL: String) -> Bool {
+        guard let url = URL(string: baseURL), let host = url.host?.lowercased() else { return false }
+        return host == "localhost" || host == "127.0.0.1" || host == "::1"
     }
 
     @objc private func toggleLogin() {
         LoginItem.setEnabled(!LoginItem.isEnabled)
-        menu.item(withTag: 102)?.state = LoginItem.isEnabled ? .on : .off
+        buildMenu()
     }
 
     @objc private func openQuoteConfig() {
@@ -665,9 +778,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.informativeText = """
         \(slogan)
 
-        左键点击菜单栏图标：打开应援卡，读金句、点赞应援
-        右键 / Control-点击：更多选项
-        金句配置：右键菜单 →「打开金句配置…」
+        左键点击菜单栏图标：打开应援面板
+        右键 / Control-点击：展示模式、模型、赛程与预测
+        每日只能点赞应援一次；日历会记录连续天数。
+
+        模型 Key 使用 AES-GCM 加密，主密钥在 macOS 钥匙串中。
+        API Key 不会以明文写入配置文件。
 
         为 Invictus Gaming 打 Call！
         """
@@ -687,9 +803,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for url in urls where url.scheme == "igcheer" {
             if url.host == "menu" {
                 if let button = statusItem.button {
-                    menu.item(withTag: 102)?.state = LoginItem.isEnabled ? .on : .off
+                    buildMenu()
                     menu.popUp(positioning: nil,
                                at: NSPoint(x: 0, y: button.bounds.height + 5), in: button)
+                }
+            } else if url.host == "mode" {
+                let value = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if let mode = PanelMode(rawValue: value), mode != currentMode {
+                    currentMode = mode
+                    UserDefaults.standard.set(mode.rawValue, forKey: "panelMode")
+                    if dropdown.isVisible { dropdown.hide() }
                 }
             } else {
                 cheer()
@@ -697,37 +820,71 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func renderPreview(to path: String) {
-        let v = DropdownView(frame: NSRect(origin: .zero, size: panelSize))
-        v.tailX = panelSize.width / 2
-        v.reloadQuotes()
-        let scale = 2
-        guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil,
-                                         pixelsWide: Int(panelSize.width) * scale,
-                                         pixelsHigh: Int(panelSize.height) * scale,
-                                         bitsPerSample: 8, samplesPerPixel: 4,
-                                         hasAlpha: true, isPlanar: false,
-                                         colorSpaceName: .deviceRGB,
-                                         bytesPerRow: 0, bitsPerPixel: 0) else { return }
-        rep.size = panelSize
-        v.cacheDisplay(in: v.bounds, to: rep)
-        if let data = rep.representation(using: .png, properties: [:]) {
-            try? data.write(to: URL(fileURLWithPath: path))
-        }
-    }
-
     private func handleLaunchArguments() {
         let args = CommandLine.arguments
         if args.contains("--diagnose") {
-            let button = statusItem.button
-            let message = "STATUS_ITEM button=\(button != nil) frame=\(button?.frame ?? .zero) window=\(String(describing: button?.window?.frame)) image=\(String(describing: button?.image?.size)) template=\(button?.image?.isTemplate ?? false) reps=\(button?.image?.representations.count ?? 0)\n"
-            FileHandle.standardOutput.write(message.data(using: .utf8)!)
+            let schedule = ScheduleStore.load()
+            let cheer = CheerStore.load()
+            let message = """
+            MODE=\(currentMode.rawValue)
+            QUOTES=\(QuoteStore.load().count)
+            MODELS=\(ModelStore.shared.models.count) ACTIVE=\(ModelStore.shared.activeModelID)
+            CHEER_DAYS=\(cheer.count) STREAK=\(CheerStore.streak(dates: cheer))
+            SCHEDULE_MATCHES=\(schedule.matches.count) SAMPLE=\(schedule.isSample)
+            STATUS_ITEM=\(statusItem.button != nil)
+            """
+            FileHandle.standardOutput.write((message + "\n").data(using: .utf8)!)
             NSApp.terminate(nil)
             return
         }
-        if let idx = args.firstIndex(of: "--render-preview"), idx + 1 < args.count {
-            renderPreview(to: args[idx + 1])
+        if args.contains("--print-models") {
+            var lines = ["COUNT=\(ModelStore.shared.models.count) ACTIVE=\(ModelStore.shared.activeModelID)"]
+            for model in ModelStore.shared.models {
+                lines.append("\(model.name) | \(model.model) | key=\(model.hasKey ? "encrypted" : "none") | \(model.baseURL)")
+            }
+            FileHandle.standardOutput.write((lines.joined(separator: "\n") + "\n").data(using: .utf8)!)
             NSApp.terminate(nil)
+            return
+        }
+        if args.contains("--print-schedule") {
+            let schedule = ScheduleStore.load()
+            var lines = ["SAMPLE=\(schedule.isSample) SOURCE=\(schedule.source) COUNT=\(schedule.matches.count)"]
+            for match in schedule.matches {
+                let opponent = match.opponent?.code ?? "TBD"
+                lines.append("\(match.startTime) | \(match.stage) | \(match.state) | IG vs \(opponent) | BO\(match.bestOf)")
+            }
+            FileHandle.standardOutput.write((lines.joined(separator: "\n") + "\n").data(using: .utf8)!)
+            NSApp.terminate(nil)
+            return
+        }
+        if args.contains("--crypto-test") {
+            do {
+                let cipher = try SecretBox.encrypt("ig-cheer-roundtrip")
+                let plain = try SecretBox.decrypt(cipher)
+                let message = plain == "ig-cheer-roundtrip"
+                    ? "KEYCHAIN_OK ciphertext_prefix=\(cipher.prefix(3))"
+                    : "KEYCHAIN_FAILED"
+                FileHandle.standardOutput.write((message + "\n").data(using: .utf8)!)
+            } catch {
+                FileHandle.standardOutput.write(("KEYCHAIN_FAILED \(error.localizedDescription)\n").data(using: .utf8)!)
+            }
+            NSApp.terminate(nil)
+            return
+        }
+        if args.contains("--settings") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.openModelSettings()
+            }
+            return
+        }
+        if let idx = args.firstIndex(of: "--render-preview"), idx + 1 < args.count {
+            let path = args[idx + 1]
+            var mode = currentMode
+            if let modeIndex = args.firstIndex(of: "--mode"), modeIndex + 1 < args.count,
+               let requested = PanelMode(rawValue: args[modeIndex + 1]) {
+                mode = requested
+            }
+            renderPreview(to: path, mode: mode)
             return
         }
         if args.contains("--print-quotes") {
@@ -745,6 +902,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.cheer()
             }
         }
+    }
+
+    private func renderPreview(to path: String, mode: PanelMode) {
+        quotes = QuoteStore.load()
+        currentSchedule = ScheduleStore.load()
+        currentMode = mode
+        let size = PanelMetrics.initialSize(for: mode)
+        let surface = PanelWebSurface(frame: NSRect(origin: .zero, size: size))
+        surface.setState(buildState(toast: nil))
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+                              styleMask: [.borderless],
+                              backing: .buffered,
+                              defer: false)
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.contentView = surface
+        surface.onResize = { height in
+            window.setContentSize(NSSize(width: size.width, height: max(400, height)))
+        }
+        window.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) {
+            surface.snapshot { image in
+                defer { NSApp.terminate(nil) }
+                guard let image,
+                      let tiff = image.tiffRepresentation,
+                      let rep = NSBitmapImageRep(data: tiff),
+                      let data = rep.representation(using: .png, properties: [:]) else {
+                    FileHandle.standardError.write("preview snapshot failed\n".data(using: .utf8)!)
+                    return
+                }
+                try? data.write(to: URL(fileURLWithPath: path))
+                print("WROTE \(path) \(rep.pixelsWide)x\(rep.pixelsHigh)")
+            }
+        }
+    }
+
+    private func showAlert(title: String, message: String) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = String(message.prefix(1200))
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        alert.runModal()
     }
 }
 
