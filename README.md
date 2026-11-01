@@ -78,7 +78,7 @@
 
 | 格式 | 预测请求 | 鉴权 | 模型列表 |
 | --- | --- | --- | --- |
-| OpenAI 兼容 | `POST {BaseURL}/chat/completions` | `Authorization: Bearer …` | `GET {BaseURL}/models` |
+| OpenAI 兼容 | `POST {BaseURL}/chat/completions` | `Authorization` 头，`Bearer` 前缀 + Key | `GET {BaseURL}/models` |
 | Anthropic Messages | `POST {BaseURL}/messages` | `x-api-key` + `anthropic-version: 2023-06-01` | `GET {BaseURL}/models?limit=100` |
 
 Anthropic 格式使用顶层 `system` 字段和必填的 `max_tokens`；回复从 `content[].text` 读取。两种格式都强制 JSON 输出，并兼容常见的代码块包裹。
