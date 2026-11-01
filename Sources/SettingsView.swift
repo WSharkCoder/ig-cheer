@@ -80,6 +80,12 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
                               defer: false)
         window.title = "模型配置 · IG 应援"
         window.isReleasedWhenClosed = false
+        // Keep the configuration window alive while the user switches to a
+        // browser to fetch a token. Only the title-bar close button should
+        // dismiss it; deactivation must not hide or close it.
+        window.hidesOnDeactivate = false
+        window.level = .floating
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         window.center()
         super.init(window: window)
         window.delegate = self
