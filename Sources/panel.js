@@ -224,7 +224,7 @@
 
   const scheduleFootnote = (state) => state.scheduleSample
     ? "赛程示例 · 右键「刷新赛程」拉取官网"
-    : "赛程源 lolesports.com · 无需 Token";
+    : "赛程源 lolesports.com";
 
   const verticalMarkup = (state) => `
     <header class="identity">
@@ -300,21 +300,22 @@
       </div>
     </section>
 
-    <section class="block">
-      <div class="section-head">
-        <div>
-          <div class="eyebrow">S16 · 赛程</div>
-          <div class="section-title">IG 接下来</div>
+    <section class="block v-schedule-section">
+      <div class="v-schedule-card">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">S16 · 赛程</div>
+            <div class="section-title">IG 接下来</div>
+          </div>
+          <span class="sync"><i class="sync-dot"></i>${state.scheduleSample ? "示例" : "官网同步"}</span>
         </div>
-        <span class="sync"><i class="sync-dot"></i>${state.scheduleSample ? "示例" : "官网同步"}</span>
+        <div class="schedule-list">${fixtureRows(state)}</div>
+        <footer class="footer">
+          <span>${scheduleFootnote(state)}</span>
+          <span class="footer-right">${escapeHTML(state.scheduleUpdated)}</span>
+        </footer>
       </div>
-      <div class="schedule-list">${fixtureRows(state)}</div>
-    </section>
-
-    <footer class="footer">
-      <span>${scheduleFootnote(state)}</span>
-      <span class="footer-right">${escapeHTML(state.scheduleUpdated)}</span>
-    </footer>`;
+    </section>`;
 
   const horizontalMarkup = (state) => `
     <div class="top">

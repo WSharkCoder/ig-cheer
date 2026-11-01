@@ -20,7 +20,7 @@
 - **多套模型配置**：可同时保存 DeepSeek、OpenAI、Claude 和本地 OpenAI 兼容服务，随时切换；模型 ID 支持下拉建议、从服务商 `/models` 拉取，也可以手填。
 - **零 Token 配置测试**：设置里的「测试连接」只请求 `GET /models` 元数据，不发送推理请求，不消耗 Token；可验证地址、TLS、鉴权和可用模型。
 - **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；输入框不调用系统安全输入控件，不读取系统钥匙串，不会弹 Mac 密码。本地无鉴权服务可以留空 Key。
-- **官网赛程同步**：附带无 Token 的抓取脚本，从 lolesports.com 公共赛程页提取 IG 比赛。
+- **官网赛程同步**：附带抓取脚本，从 lolesports.com 公共赛程页提取 IG 比赛。
 - **金句配置**：金句从纯文本文件读取，改完重新打开面板即可生效。
 - **纯菜单栏应用**：`LSUIElement`，不显示 Dock 图标；面板 20 秒自动收起，点空白处立即收起。
 
@@ -60,7 +60,7 @@
 /Applications/IG应援.app
 ```
 
-首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.1`（build 13）。
+首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.2`（build 14）。
 
 ## 模型配置与 API Key 安全
 
@@ -183,7 +183,7 @@ LM Studio、vLLM、llama.cpp server 等只要暴露 OpenAI 兼容的 `/v1` 端�
 ~/Library/Application Support/IGCheer/.model-key   # 本地主密钥，0600
 ```
 
-## S16 赛程同步（无需 Token）
+## S16 赛程同步
 
 脚本通过 lolesports.com 的公开赛程页提取内嵌的比赛数据，不依赖 API Token：
 
@@ -205,7 +205,7 @@ python3 tools/fetch_schedule.py --team IG --league worlds
 python3 tools/fetch_schedule.py --out /tmp/ig.json   # 自定义输出路径
 ```
 
-应用内也可以右键 →「刷新赛程（官网 · 无需 Token）」直接同步。脚本使用 Python 标准库，无需安装第三方依赖。
+应用内也可以右键 →「刷新赛程（官网）」直接同步。脚本使用 Python 标准库，无需安装第三方依赖。
 
 ## 每日应援数据
 

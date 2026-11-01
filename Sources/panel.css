@@ -560,6 +560,17 @@ h1 {
 }
 .ai-card .section-head { margin-bottom: 5px; }
 .ai-card .pred-foot { margin-top: 5px; }
+.v-schedule-section {
+  margin-top: 10px;
+  padding-top: 0;
+  border-top: 0;
+}
+.v-schedule-card {
+  padding: 12px 13px 10px;
+  border-radius: 15px;
+  background: var(--paper-2);
+}
+.v-schedule-card .section-head { margin-bottom: 5px; }
 .quote-section + .cta { margin-top: 18px; }
 .manual-tag {
   flex: 0 0 auto;
@@ -1149,5 +1160,8 @@ button:focus { outline: none; }
 }
 #toast.show { opacity: 1; transform: translate(-50%, 0); }
 .v2 .dashboard.compact-dashboard { align-items: start; }
-.v2 .dashboard.compact-dashboard .dash-card { align-self: start; }
+.v2 .prediction-stack .dash-card {
+  width: 100%;
+  align-self: stretch;
+}
 .panel.v2.compact { min-height: 0; }

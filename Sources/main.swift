@@ -451,7 +451,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
-        let scheduleItem = NSMenuItem(title: "刷新赛程（官网 · 无需 Token）",
+        let scheduleItem = NSMenuItem(title: "刷新赛程（官网）",
                                       action: #selector(refreshScheduleAction), keyEquivalent: "")
         scheduleItem.target = self
         menu.addItem(scheduleItem)
