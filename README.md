@@ -18,7 +18,7 @@
 - **我的预测（手动）**：单独的手动模块，逐场选择合法比分（IG 在左）；选择即保存到本地，不请求模型，也不消耗 Token。每个选项都按该场 **BO1 / BO3 / BO5** 生成，确保比分与赛制一致。
 - **AI 预测**：读取 IG 的世界赛赛程，调用已配置的 OpenAI 兼容或 Anthropic Messages 模型；面板展示模型型号，并逐场标注 **BO1 / BO3 / BO5**，比分按赛制校验（BO1 为 1:0，BO3 为 2:0/2:1，BO5 为 3:0/3:1/3:2）。只有点击「刷新预测」才请求。它和「我的预测」是两个独立模块，互不覆盖。
 - **多套模型配置**：可同时保存 DeepSeek、OpenAI、Claude 和本地 OpenAI 兼容服务，随时切换；模型 ID 支持下拉建议、从服务商 `/models` 拉取，也可以手填。
-- **零 Token 配置测试**：设置里的「测试连接」只请求 `GET /models` 元数据，不发送推理请求，不消耗 Token；可验证地址、TLS、鉴权和可用模型。
+- **真实连通性测试**：设置里的「测试连接」会向真实的 `/chat/completions` 或 `/messages` 发送一条 `max_tokens: 1`、内容为 `hi` 的最小请求，验证地址、TLS、鉴权、API 格式和模型是否真正可用；实际用量以服务端返回的 `usage` 为准（通常只有几个输入 Token）。
 - **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；输入框不调用系统安全输入控件，不读取系统钥匙串，不会弹 Mac 密码。本地无鉴权服务可以留空 Key。
 - **官网赛程同步**：附带抓取脚本，从 lolesports.com 公共赛程页提取 IG 比赛。
 - **金句配置**：金句从纯文本文件读取，改完重新打开面板即可生效。
@@ -60,7 +60,7 @@
 /Applications/IG应援.app
 ```
 
-首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.5`（build 17）。
+首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.3.7`（build 19）。
 
 ## 模型配置与 API Key 安全
 
@@ -73,7 +73,7 @@
 - **模型标识**：请求体中的 `model`。下拉里是可编辑的建议列表，也可以直接输入任意 ID。
 - **Base URL**：接口根地址，通常以 `/v1` 结尾。
 - **API Key / Token**：可选；保存时加密。输入框是普通文本框，不触发 macOS 的 Passwords 自动填充或钥匙串授权。
-- **测试连接**：只请求 `GET /models`，验证连接与鉴权，不消耗 Token。
+- **测试连接**：发送一条 `max_tokens: 1` 的真实消息请求，验证是否真正连上大模型；实际只消耗极少量 Token。
 - **设为当前预测模型**：预测时使用这一套配置。
 
 设置页采用紧凑编辑：字段说明放在 **Hover** 提示里，底部两段常驻说明不再展示；API 格式、获取模型和测试连接也各有悬停说明。
@@ -121,32 +121,42 @@ user:   IG matches:
 - 列表请求与预测请求是分开的，Key 不会因为打开设置窗口而发出。
 - 远程服务（例如 DeepSeek）的 `/models` 需要鉴权；未填 Key 时 App 会保留内置模型建议并提示，不会发送无鉴权请求。
 
-### 配置测试：零 Token 连通性检查
+### 配置测试：真实连接大模型
 
-设置窗底部有「测试连接」。它只发送一次：
+设置窗底部的「测试连接」会向真实消息接口发送一条最小请求。它不再只查 `/models`，而是确认模型真的能接住请求并返回响应。
 
-```http
-GET {Base URL}/models
+真实请求的 body 刻意压到最小：
+
+```json
+{
+  "model": "当前模型",
+  "messages": [{"role": "user", "content": "hi"}],
+  "max_tokens": 1,
+  "temperature": 0
+}
 ```
 
-不会发送 `/chat/completions` 或 `/messages`，不会生成内容，也不消耗 Token。适合在保存配置前确认地址、TLS、鉴权和模型列表是否可用。
+- OpenAI 兼容走 `POST /chat/completions`；Anthropic 走 `POST /messages`。
+- 不发送长 system prompt，`messages` 只有一条 `hi`，输出上限为 `1`；DeepSeek 仍会关闭 thinking。
+- 返回 `2xx` 即表示地址、鉴权、API 格式和模型均可用；App 会显示 HTTP 状态、延迟和服务端返回的 `usage`。
+- 实际消耗通常是几个输入 Token + 最多 1 个输出 Token。若服务端不返回 `usage`，App 会提示本次仍可能产生少量费用。
 
 | 方案 | 消耗 Token | 能验证什么 | 本项目是否采用 |
 | --- | --- | --- | --- |
-| `GET /models` | 否 | 地址、TLS、鉴权、可用模型 | ✅「测试连接」 |
-| `HEAD` / `GET` Base URL | 否 | 只能确认网络可达，不能验证 Key | 作为 404 时的提示 |
-| `POST /chat/completions` + `max_tokens: 1` | **是** | 完整推理链路 | ❌ 不用 |
-| Anthropic `count_tokens` | 不保证免费 | 只统计 token，不验证生成 | ❌ 不用 |
+| `POST /chat/completions` 或 `/messages` + `max_tokens: 1` | **少量**（通常几个） | 地址、TLS、鉴权、API 格式、模型、完整消息链路 | ✅「测试连接」 |
+| `GET /models` | 否 | 地址、TLS、鉴权、可用模型列表；不能证明模型能对话 | ❌ 不作为测试连接 |
+| `HEAD` / `GET` Base URL | 否 | 只能确认网络可达，不能验证 Key | 不使用 |
+| Anthropic `count_tokens` | 不保证免费 | 只统计 token，不验证生成 | 不使用 |
 
 结果提示：
 
-- **连接正常**：显示模型数量和延迟，并标注「未消耗 Token」。
+- **真实请求成功**：显示 HTTP 状态、延迟和 `usage`（例如 `约 6 tokens`）。
 - **401 / 403**：鉴权失败，Key 无效或权限不足。
-- **404**：网络可达，但该服务没有 `/models`。此时不发送推理请求就无法继续验证 Key；App 会明确提示，而不会偷偷发一次付费请求。
-- **本地服务**：`localhost` / `127.0.0.1` / `::1` 可以留空 Key，直接测试 `/models`。
+- **404**：消息接口路径不存在，通常是 API 格式或 Base URL 不匹配；DeepSeek 的 Anthropic 根地址应为 `https://api.deepseek.com/anthropic`。
+- **本地服务**：`localhost` / `127.0.0.1` / `::1` 可以留空 Key。
 - **远程服务未填 Key**：直接提示，不发送无鉴权请求。
 
-> 零 Token 的前提是服务商提供免费的模型列表接口。OpenAI 兼容服务、Anthropic 和 Ollama 的 OpenAI 兼容端点通常满足；若服务商没有该接口，用任何「最小推理」方式测试都会产生 Token 费用，因此这里选择不自动回退。
+> 真正验证“模型能对话”必须打到消息接口，因此这里不提供伪造的零 Token 通过提示。请求已经压到 `hi` + `max_tokens: 1`，这是能真实验证连通性的最小方案。
 
 ### 本地模型示例
 

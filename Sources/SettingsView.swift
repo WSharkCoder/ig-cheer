@@ -254,7 +254,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         testButton.controlSize = .regular
         testButton.font = NSFont.systemFont(ofSize: 11, weight: .regular)
         testButton.frame = NSRect(x: 270, y: 78, width: 100, height: 28)
-        testButton.toolTip = "GET {Base URL}/models，只验证连通与鉴权，不发送推理请求，不消耗 Token"
+        testButton.toolTip = "向真实消息接口发送一条最小请求（最多 1 个输出 Token），验证是否真正连上大模型"
         editor.addSubview(testButton)
 
         statusLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
@@ -587,7 +587,12 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         var draft = config
         draft.baseURL = base
         draft.apiFormat = currentFormat
-        draft.model = modelCombo.stringValue
+        draft.model = modelCombo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !draft.model.isEmpty else {
+            statusLabel.stringValue = "请先填写模型标识"
+            statusLabel.toolTip = nil
+            return
+        }
 
         var apiKey: String?
         do {
@@ -597,14 +602,11 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
             return
         }
 
-        // The probe is metadata-only. Refuse to hit a hosted endpoint
-        // without a key: it would just produce a confusing 401, with no
-        // useful connectivity information.
         if apiKey == nil && !Self.isLocalEndpoint(base) {
-            statusLabel.stringValue = "未配置 Key · 无法测试鉴权"
-            statusLabel.toolTip = "远程服务的 /models 需要 API Key；本地服务可以留空。"
+            statusLabel.stringValue = "未配置 Key · 无法发送真实请求"
+            statusLabel.toolTip = "真实请求需要鉴权；请填写 API Key 后再测试。"
             showAlert(title: "需要 API Key",
-                      message: "远程服务的 /models 需要鉴权。请先在上方填写 API Key；本地服务可以留空。")
+                      message: "真实请求会调用消息接口，远程服务必须携带 API Key。请先填写 Key；本地服务可以留空。")
             return
         }
 
@@ -612,10 +614,10 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         testButton.title = "测试中…"
         testButton.isEnabled = false
         fetchButton.isEnabled = false
-        statusLabel.stringValue = "测试连接（GET /models，不消耗 Token）…"
+        statusLabel.stringValue = "正在连接模型（真实请求，最多 1 个输出 Token）…"
         statusLabel.toolTip = nil
 
-        ModelCatalogClient.testConnection(model: draft, apiKey: apiKey) { [weak self] result in
+        PredictionClient.testConnection(model: draft, apiKey: apiKey) { [weak self] result in
             guard let self else { return }
             self.testInFlight = false
             self.testButton.title = "测试连接"
@@ -625,49 +627,50 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
             switch result {
             case .success(let probe):
                 let latency = String(format: "%.0f ms", probe.elapsed * 1000)
-                if probe.modelCount > 0 {
-                    self.statusLabel.stringValue = "连接正常 · \(probe.modelCount) 个模型 · \(latency) · 未消耗 Token"
-                } else {
-                    self.statusLabel.stringValue = "连接正常 · /models 无模型 · \(latency) · 未消耗 Token"
+                let usage = probe.usageTokens.map { "约 \($0) tokens" } ?? "Token 用量未返回"
+                self.statusLabel.stringValue = "模型已连通 · HTTP \(probe.status) · \(latency) · \(usage)"
+                var tips = ["已调用 \(draft.endpoint?.absoluteString ?? "真实消息接口")",
+                            "返回 HTTP \(probe.status)，说明地址、鉴权、API 格式与模型均可用。"]
+                if let finish = probe.finishReason {
+                    tips.append("finish: \(finish)")
                 }
-                self.statusLabel.toolTip = "只发送了 GET /models 元数据请求，没有发送 /chat/completions 或 /messages，不消耗 Token。"
+                if probe.usageTokens == nil {
+                    tips.append("服务端未返回 usage；本次仍可能产生少量 Token 消耗。")
+                }
+                self.statusLabel.toolTip = tips.joined(separator: "\n")
             case .failure(let error):
-                var alertTitle = "连接测试失败"
-                var alertMessage = error.localizedDescription
-                self.statusLabel.stringValue = "连接测试失败"
+                self.statusLabel.stringValue = "模型连接失败"
                 self.statusLabel.toolTip = error.localizedDescription
-                if let catalog = error as? ModelCatalogError {
-                    switch catalog {
+                var alertTitle = "模型连接失败"
+                var alertMessage = error.localizedDescription
+                if let predictionError = error as? PredictionClientError {
+                    switch predictionError {
                     case .http(let status, _):
                         if status == 401 || status == 403 {
-                            self.statusLabel.stringValue = "鉴权失败 · Key 无效或权限不足"
+                            self.statusLabel.stringValue = "鉴权失败 · HTTP \(status)"
                             alertTitle = "鉴权失败"
-                            alertMessage = "服务端拒绝了测试请求（HTTP \(status)）。请检查 API Key 是否正确、是否有该模型的权限，以及 Base URL 是否对应同一个环境。"
+                            alertMessage = "真实请求被服务端拒绝（HTTP \(status)）。请检查 API Key、模型权限和 Base URL 是否属于同一个环境。"
                         } else if status == 404 {
-                            self.statusLabel.stringValue = "接口可达 · /models 不可用"
-                            self.statusLabel.toolTip = "网络可达，但该服务没有 /models；不发送推理请求就无法进一步验证 Key。"
-                            return
+                            self.statusLabel.stringValue = "消息接口路径不存在 · HTTP 404"
+                            alertTitle = "接口路径不存在"
                         } else if status == 429 {
                             self.statusLabel.stringValue = "请求被限流 · HTTP 429"
                             alertTitle = "请求被限流"
-                            alertMessage = "服务端返回 HTTP 429。请稍后再测试，或检查账号额度与速率限制。"
+                            alertMessage = "服务端返回 HTTP 429。请稍后重试，或检查账号额度与速率限制。"
                         } else {
                             self.statusLabel.stringValue = "接口返回 HTTP \(status)"
-                            alertMessage = "接口返回 HTTP \(status)。请检查 Base URL 是否以 /v1 结尾，以及该地址是否提供 /models。"
                         }
-                    case .transport(let message):
-                        self.statusLabel.stringValue = "连接失败 · 无法访问"
+                    case .transport:
+                        self.statusLabel.stringValue = "无法连接 · 检查地址和网络"
                         alertTitle = "无法连接"
-                        alertMessage = "无法连接 \(base)：\(message)"
                     case .malformedJSON:
-                        self.statusLabel.stringValue = "响应格式异常"
+                        self.statusLabel.stringValue = "接口有响应，但不是有效 JSON"
                         alertTitle = "响应格式异常"
-                        alertMessage = "接口有响应，但 /models 返回的内容不是可解析的模型列表。请确认 Base URL 是否正确。"
                     case .invalidEndpoint:
                         self.statusLabel.stringValue = "Base URL 无效"
-                        alertTitle = "Base URL 无效"
-                        alertMessage = "请填写完整的 http(s) 地址，例如 https://api.openai.com/v1。"
-                    case .empty:
+                    case .badResponse:
+                        self.statusLabel.stringValue = "接口响应异常"
+                    case .noSchedule, .noPredictions:
                         break
                     }
                 }

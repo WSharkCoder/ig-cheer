@@ -5,11 +5,6 @@ struct RemoteModel: Equatable {
     var displayName: String?
 }
 
-struct ModelConnectionProbe {
-    var modelCount: Int
-    var elapsed: TimeInterval
-}
-
 enum ModelCatalogError: LocalizedError {
     case invalidEndpoint
     case http(Int, String)
@@ -112,31 +107,6 @@ enum ModelCatalogClient {
                 }
             }
         }.resume()
-    }
-
-    /// Connectivity/auth check with no inference and therefore no token
-    /// consumption. It only performs GET /models, which is a metadata call.
-    static func testConnection(model: ModelConfig,
-                               apiKey: String?,
-                               completion: @escaping (Result<ModelConnectionProbe, Error>) -> Void) {
-        let started = Date()
-        fetch(model: model, apiKey: apiKey) { result in
-            switch result {
-            case .success(let models):
-                completion(.success(ModelConnectionProbe(modelCount: models.count,
-                                                         elapsed: Date().timeIntervalSince(started))))
-            case .failure(let error):
-                // A 200 response with no model list is still a successful
-                // connectivity check; only auth/transport failures matter.
-                if let catalogError = error as? ModelCatalogError,
-                   case .empty = catalogError {
-                    completion(.success(ModelConnectionProbe(modelCount: 0,
-                                                             elapsed: Date().timeIntervalSince(started))))
-                    return
-                }
-                completion(.failure(error))
-            }
-        }
     }
 
     static func suggestions(for model: ModelConfig) -> [String] {

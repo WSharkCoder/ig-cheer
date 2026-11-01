@@ -32,6 +32,13 @@ enum PredictionClientError: LocalizedError {
     }
 }
 
+struct ChatConnectionProbe {
+    var elapsed: TimeInterval
+    var status: Int
+    var usageTokens: Int?
+    var finishReason: String?
+}
+
 enum PredictionClient {
     static func fetch(model: ModelConfig,
                       apiKey: String?,
@@ -131,6 +138,115 @@ enum PredictionClient {
                 DispatchQueue.main.async {
                     completion(.failure(error))
                 }
+            }
+        }.resume()
+    }
+
+    /// A real chat-endpoint check with a deliberately tiny output budget.
+    /// Unlike GET /models, this verifies the model, auth, API format, and
+    /// message endpoint. It consumes only a few tokens (input + at most 1
+    /// output token), and reports the provider's usage when available.
+    static func testConnection(model: ModelConfig,
+                               apiKey: String?,
+                               completion: @escaping (Result<ChatConnectionProbe, Error>) -> Void) {
+        guard let endpoint = model.endpoint else {
+            completion(.failure(PredictionClientError.invalidEndpoint))
+            return
+        }
+
+        var body: [String: Any] = [
+            "model": model.model,
+            "temperature": 0,
+            "max_tokens": 1
+        ]
+        let userMessage: [String: Any] = ["role": "user", "content": "hi"]
+        switch model.apiFormat {
+        case .openai:
+            body["messages"] = [userMessage]
+        case .anthropic:
+            body["messages"] = [userMessage]
+        }
+        if isDeepSeek(model) {
+            body["thinking"] = ["type": "disabled"]
+        }
+
+        guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
+            completion(.failure(PredictionClientError.malformedJSON))
+            return
+        }
+
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        authorize(&request, model: model, apiKey: apiKey)
+        request.httpBody = payload
+
+        let started = Date()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 20
+        configuration.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: configuration)
+        session.dataTask(with: request) { data, response, error in
+            defer { session.finishTasksAndInvalidate() }
+            if let error {
+                DispatchQueue.main.async {
+                    completion(.failure(PredictionClientError.transport(error.localizedDescription)))
+                }
+                return
+            }
+            guard let http = response as? HTTPURLResponse else {
+                DispatchQueue.main.async {
+                    completion(.failure(PredictionClientError.badResponse("空响应")))
+                }
+                return
+            }
+            guard let data, !data.isEmpty else {
+                DispatchQueue.main.async {
+                    completion(.failure(PredictionClientError.http(http.statusCode, "")))
+                }
+                return
+            }
+            if !(200...299).contains(http.statusCode) {
+                let body = String(data: data, encoding: .utf8) ?? ""
+                DispatchQueue.main.async {
+                    completion(.failure(PredictionClientError.http(http.statusCode,
+                                                                  String(body.prefix(320)))))
+                }
+                return
+            }
+            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                DispatchQueue.main.async {
+                    completion(.failure(PredictionClientError.malformedJSON))
+                }
+                return
+            }
+            var usage: Int?
+            if let usageObject = object["usage"] as? [String: Any] {
+                usage = (usageObject["total_tokens"] as? NSNumber)?.intValue
+                if usage == nil {
+                    let input = (usageObject["input_tokens"] as? NSNumber)?.intValue
+                        ?? (usageObject["prompt_tokens"] as? NSNumber)?.intValue
+                    let output = (usageObject["output_tokens"] as? NSNumber)?.intValue
+                        ?? (usageObject["completion_tokens"] as? NSNumber)?.intValue
+                    if input != nil || output != nil {
+                        usage = (input ?? 0) + (output ?? 0)
+                    }
+                }
+            }
+            let finish: String?
+            if let choices = object["choices"] as? [[String: Any]],
+               let first = choices.first {
+                finish = first["finish_reason"] as? String
+            } else {
+                finish = object["stop_reason"] as? String
+            }
+            let probe = ChatConnectionProbe(elapsed: Date().timeIntervalSince(started),
+                                             status: http.statusCode,
+                                             usageTokens: usage,
+                                             finishReason: finish)
+            DispatchQueue.main.async {
+                completion(.success(probe))
             }
         }.resume()
     }
