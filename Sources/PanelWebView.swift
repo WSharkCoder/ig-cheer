@@ -10,6 +10,8 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     var onNextQuote: (() -> Void)?
     var onOpenModels: (() -> Void)?
     var onRefreshPredictions: (() -> Void)?
+    var onSaveMyPrediction: ((String, Int, Int) -> Void)?
+    var onClearMyPrediction: ((String) -> Void)?
     var onDismiss: (() -> Void)?
     var onResize: ((CGFloat) -> Void)?
 
@@ -137,6 +139,16 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
             onOpenModels?()
         case "refreshPrediction":
             onRefreshPredictions?()
+        case "saveMyPrediction":
+            if let matchID = body["matchID"] as? String,
+               let ig = body["igScore"] as? NSNumber,
+               let opponent = body["opponentScore"] as? NSNumber {
+                onSaveMyPrediction?(matchID, ig.intValue, opponent.intValue)
+            }
+        case "clearMyPrediction":
+            if let matchID = body["matchID"] as? String {
+                onClearMyPrediction?(matchID)
+            }
         case "dismiss":
             onDismiss?()
         case "resize":

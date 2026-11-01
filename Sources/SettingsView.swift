@@ -62,7 +62,6 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let formatPopUp = NSPopUpButton()
     private let activeCheck = NSButton(checkboxWithTitle: "设为当前预测模型", target: nil, action: nil)
     private let titleLabel = NSTextField(labelWithString: "选择一套模型配置")
-    private let keyHint = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let clearKeyButton = NSButton(title: "清除 Key", target: nil, action: nil)
     private let fetchButton = NSButton(title: "获取模型", target: nil, action: nil)
@@ -186,6 +185,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
 
         addFieldLabel("显示名称", hint: "面板上展示的模型型号", y: 407, to: editor)
         configureField(nameField, placeholder: "例如 DeepSeek V3.2", y: 379, in: editor)
+        nameField.toolTip = "面板上展示的模型型号"
 
         addFieldLabel("模型标识", hint: "可下拉选择，或点「获取模型」请求 /models", y: 347, to: editor)
         modelCombo.frame = NSRect(x: 24, y: 319, width: 330, height: 25)
@@ -213,23 +213,15 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         let keyLabel = NSTextField(labelWithString: "API Key / Token")
         keyLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         keyLabel.frame = NSRect(x: 24, y: 229, width: 120, height: 15)
+        keyLabel.toolTip = "留空保留现有 Key；远程服务需填写，本地可留空；不使用系统钥匙串。"
         editor.addSubview(keyLabel)
-        let keyHintLabel = NSTextField(labelWithString: "留空保留现有 Key；远程服务需填写，本地可留空；不使用系统钥匙串")
-        keyHintLabel.font = NSFont.systemFont(ofSize: 9)
-        keyHintLabel.textColor = .secondaryLabelColor
-        keyHintLabel.frame = NSRect(x: 145, y: 229, width: 380, height: 15)
-        editor.addSubview(keyHintLabel)
 
         keyField.placeholderString = "粘贴 API Key"
         keyField.isAutomaticTextCompletionEnabled = false
         keyField.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         keyField.frame = NSRect(x: 24, y: 199, width: 460, height: 25)
+        keyField.toolTip = "留空保留现有 Key；远程服务需填写，本地可留空；不使用系统钥匙串。"
         editor.addSubview(keyField)
-
-        keyHint.font = NSFont.systemFont(ofSize: 9)
-        keyHint.textColor = .secondaryLabelColor
-        keyHint.frame = NSRect(x: 24, y: 176, width: 460, height: 16)
-        editor.addSubview(keyHint)
 
         clearKeyButton.target = self
         clearKeyButton.action = #selector(clearKey)
@@ -238,12 +230,6 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         clearKeyButton.contentTintColor = .systemRed
         clearKeyButton.frame = NSRect(x: 24, y: 148, width: 90, height: 20)
         editor.addSubview(clearKeyButton)
-
-        let lockNote = NSTextField(labelWithString: "AES-GCM 加密后写入 models.json；本地密钥权限 0600，不读取系统钥匙串。")
-        lockNote.font = NSFont.systemFont(ofSize: 9)
-        lockNote.textColor = .secondaryLabelColor
-        lockNote.frame = NSRect(x: 24, y: 120, width: 490, height: 16)
-        editor.addSubview(lockNote)
 
         let saveButton = NSButton(title: "保存配置", target: self, action: #selector(saveModel))
         saveButton.bezelStyle = .rounded
@@ -270,24 +256,16 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.frame = NSRect(x: 24, y: 54, width: 500, height: 16)
         editor.addSubview(statusLabel)
-
-        let footnote = NSTextField(labelWithString: "AI 徽章显示「显示名称」；预测请求只在点击「刷新预测」时发出；测试连接只请求 /models。")
-        footnote.font = NSFont.systemFont(ofSize: 9)
-        footnote.textColor = .secondaryLabelColor
-        footnote.frame = NSRect(x: 24, y: 28, width: 500, height: 16)
-        editor.addSubview(footnote)
     }
 
     private func addFieldLabel(_ title: String, hint: String, y: CGFloat, to view: NSView) {
         let label = NSTextField(labelWithString: title)
         label.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         label.frame = NSRect(x: 24, y: y, width: 110, height: 15)
+        // Keep the editor quiet: hints live in tooltips instead of a second
+        // permanent line of small text.
+        label.toolTip = hint
         view.addSubview(label)
-        let hintLabel = NSTextField(labelWithString: hint)
-        hintLabel.font = NSFont.systemFont(ofSize: 9)
-        hintLabel.textColor = .secondaryLabelColor
-        hintLabel.frame = NSRect(x: 145, y: y, width: 380, height: 15)
-        view.addSubview(hintLabel)
     }
 
     private func configureField(_ field: NSTextField, placeholder: String, y: CGFloat, in view: NSView) {
@@ -360,9 +338,9 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         baseURLField.stringValue = config.baseURL
         keyField.stringValue = ""
         keyField.placeholderString = config.hasKey ? "已保存（留空不修改）" : "粘贴 API Key"
-        keyHint.stringValue = config.hasKey
-            ? "已加密保存；留空保持不变。"
-            : "尚未配置 Key；本地服务可留空。"
+        keyField.toolTip = config.hasKey
+            ? "已加密保存；留空保持不变。留空也会保留现有 Key；不使用系统钥匙串。"
+            : "尚未配置 Key；本地服务可留空。远程服务需填写；不使用系统钥匙串。"
         activeCheck.state = store.activeModelID == config.id ? .on : .off
         clearKeyButton.isEnabled = config.hasKey
         statusLabel.stringValue = ""
@@ -389,7 +367,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         )), preserving: "")
         baseURLField.stringValue = ""
         keyField.stringValue = ""
-        keyHint.stringValue = ""
+        keyField.toolTip = "留空保留现有 Key；远程服务需填写，本地可留空；不使用系统钥匙串。"
         activeCheck.state = .off
         clearKeyButton.isEnabled = false
         statusLabel.stringValue = ""

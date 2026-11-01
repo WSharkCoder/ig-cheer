@@ -167,6 +167,8 @@ final class DropdownController {
     var onNextQuote: (() -> Void)?
     var onOpenModels: (() -> Void)?
     var onRefreshPredictions: (() -> Void)?
+    var onSaveMyPrediction: ((String, Int, Int) -> Void)?
+    var onClearMyPrediction: ((String) -> Void)?
     var onDismiss: (() -> Void)?
 
     var isVisible: Bool {
@@ -195,6 +197,12 @@ final class DropdownController {
         s.onNextQuote = { [weak self] in self?.onNextQuote?() }
         s.onOpenModels = { [weak self] in self?.onOpenModels?() }
         s.onRefreshPredictions = { [weak self] in self?.onRefreshPredictions?() }
+        s.onSaveMyPrediction = { [weak self] matchID, ig, opponent in
+            self?.onSaveMyPrediction?(matchID, ig, opponent)
+        }
+        s.onClearMyPrediction = { [weak self] matchID in
+            self?.onClearMyPrediction?(matchID)
+        }
         s.onDismiss = { [weak self] in self?.onDismiss?() }
         s.onResize = { [weak self] height in self?.resize(to: height) }
         p.contentView = s
@@ -349,6 +357,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropdown.onNextQuote = { [weak self] in self?.cycleQuote() }
         dropdown.onOpenModels = { [weak self] in self?.openModelSettings() }
         dropdown.onRefreshPredictions = { [weak self] in self?.refreshPredictions() }
+        dropdown.onSaveMyPrediction = { [weak self] matchID, ig, opponent in
+            self?.saveMyPrediction(matchID: matchID, igScore: ig, opponentScore: opponent)
+        }
+        dropdown.onClearMyPrediction = { [weak self] matchID in
+            self?.clearMyPrediction(matchID: matchID)
+        }
         dropdown.onDismiss = { [weak self] in self?.dropdown.hide() }
     }
 
@@ -637,6 +651,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func saveMyPrediction(matchID: String, igScore: Int, opponentScore: Int) {
+        let schedule = currentSchedule ?? ScheduleStore.load()
+        guard let match = schedule.matches.first(where: { $0.id == matchID }) else {
+            toastText = "赛程已更新，请重新选择"
+            if dropdown.isVisible {
+                dropdown.update(state: buildState(toast: toastText))
+                dropdown.keepAlive()
+            }
+            clearToast(after: 2.0)
+            return
+        }
+        let saved = ManualPredictionStore.update(matchID: matchID,
+                                                 igScore: igScore,
+                                                 opponentScore: opponentScore,
+                                                 bestOf: match.bestOf)
+        guard saved else {
+            toastText = "保存失败 · 请检查配置目录权限"
+            if dropdown.isVisible {
+                dropdown.update(state: buildState(toast: toastText))
+                dropdown.keepAlive()
+            }
+            clearToast(after: 2.0)
+            return
+        }
+        toastText = "我的预测已保存 · \(igScore) : \(opponentScore)"
+        if dropdown.isVisible {
+            dropdown.update(state: buildState(toast: toastText))
+            dropdown.keepAlive()
+        }
+        clearToast(after: 2.0)
+    }
+
+    private func clearMyPrediction(matchID: String) {
+        ManualPredictionStore.remove(matchID: matchID)
+        toastText = "已清除我的预测"
+        if dropdown.isVisible {
+            dropdown.update(state: buildState(toast: toastText))
+            dropdown.keepAlive()
+        }
+        clearToast(after: 2.0)
+    }
+
     private func handleLike() {
         if CheerStore.markToday() {
             toastText = "点赞成功 · IG 加油！"
@@ -702,6 +758,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let model = ModelStore.shared.activeModel
+        let manualSaved = ManualPredictionStore.load()
+        var manualPredictionRows: [PanelManualPredictionRow] = []
+        for match in upcoming {
+            let parts = DisplayFormat.dateParts(match.startDate)
+            let stored = manualSaved.first(where: { $0.matchID == match.id })
+            let validStored: ManualPrediction? = stored.flatMap { candidate in
+                let probe = ScorePrediction(matchID: match.id,
+                                            igScore: candidate.igScore,
+                                            opponentScore: candidate.opponentScore,
+                                            confidence: 0)
+                return probe.isValid(for: match.bestOf) ? candidate : nil
+            }
+            manualPredictionRows.append(PanelManualPredictionRow(
+                matchID: match.id,
+                opponent: match.opponent?.code ?? "TBD",
+                stage: DisplayFormat.stage(match.stage),
+                bestOf: [1, 3, 5].contains(match.bestOf) ? match.bestOf : 3,
+                dateText: parts.date,
+                igScore: validStored?.igScore,
+                opponentScore: validStored?.opponentScore
+            ))
+        }
+
         let cached = PredictionStore.load()
         let cacheUsable = cached != nil
             && cached?.modelID == model?.model
@@ -747,6 +826,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             calendar: PanelCalendarState(year: year, month: month, today: today, likedDays: likedDays),
             schedule: scheduleRows,
             predictions: predictionRows,
+            manualPredictions: manualPredictionRows,
             modelName: model?.name ?? "未配置模型",
             modelID: model?.model ?? "sample",
             modelConfigured: configured,

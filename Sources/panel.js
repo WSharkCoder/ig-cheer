@@ -130,6 +130,73 @@
     return `<span class="pred-note">${note}</span><button class="pred-refresh" type="button" data-action="refresh-prediction">刷新预测</button>`;
   };
 
+  // Every legal final score for the series length: the winner has exactly
+  // the required number of map wins, the loser has fewer.
+  const seriesScores = (bestOf) => {
+    const bo = [1, 3, 5].includes(Number(bestOf)) ? Number(bestOf) : 3;
+    const needed = (bo + 1) / 2;
+    const scores = [];
+    for (let loser = 0; loser < needed; loser += 1) scores.push([needed, loser]);
+    for (let loser = 0; loser < needed; loser += 1) scores.push([loser, needed]);
+    return scores;
+  };
+
+  const manualScoreOptions = (row) => {
+    const selected = row.igScore != null && row.opponentScore != null
+      ? `${row.igScore}-${row.opponentScore}`
+      : "";
+    const options = seriesScores(row.bestOf).map(([ig, opponent]) => {
+      const value = `${ig}-${opponent}`;
+      return `<option value="${value}" ${selected === value ? "selected" : ""}>${ig} : ${opponent}</option>`;
+    }).join("");
+    return `<option value="" ${selected ? "" : "selected"}>选择比分</option>${options}`;
+  };
+
+  const manualPredictionRows = (state) => {
+    if (!state.manualPredictions?.length) {
+      return `<div class="empty-row">暂无待预测赛程；赛程更新后可以填写。</div>`;
+    }
+    return state.manualPredictions.map((row) => {
+      const saved = row.igScore != null && row.opponentScore != null;
+      const resultClass = saved
+        ? (row.igScore > row.opponentScore ? "is-win" : "is-loss")
+        : "";
+      const bo = `<span class="bo-pill">BO${escapeHTML(String(row.bestOf))}</span>`;
+      return `
+        <div class="manual-row">
+          <div class="manual-main">
+            <div class="manual-teams">
+              <span class="ig">IG</span>
+              <span class="versus">vs</span>
+              <span class="winner">${escapeHTML(row.opponent)}</span>
+            </div>
+            <div class="manual-meta">${bo}${escapeHTML(row.stage)} · ${escapeHTML(row.dateText)}</div>
+          </div>
+          <span class="manual-picker">
+            <select class="manual-score ${saved ? `has-value ${resultClass}` : ""}"
+                    data-my-score="${escapeHTML(row.matchID)}"
+                    aria-label="IG vs ${escapeHTML(row.opponent)} 我的预测比分">
+              ${manualScoreOptions(row)}
+            </select>
+          </span>
+        </div>`;
+    }).join("");
+  };
+
+  const manualCardMarkup = (state) => `
+    <div class="section-head">
+      <div>
+        <div class="eyebrow">S16 · 手动填写</div>
+        <div class="section-title">我的预测</div>
+      </div>
+      <span class="manual-tag">自己选</span>
+    </div>
+    <div class="manual-list">${manualPredictionRows(state)}</div>
+    <div class="manual-foot">
+      <span>IG 在左 · 选择即保存</span>
+      <span>按 BO 校验</span>
+    </div>`;
+
   const fixtureRows = (state) => {
     if (!state.schedule.length) {
       return `<div class="empty-row">官网暂无 IG 赛程 · 右键「刷新赛程」。</div>`;
@@ -213,11 +280,17 @@
       </div>
     </section>
 
+    <section class="block manual-section">
+      <div class="manual-card">
+        ${manualCardMarkup(state)}
+      </div>
+    </section>
+
     <section class="block">
       <div class="section-head">
         <div>
-          <div class="eyebrow">S16 英雄联盟全球总决赛</div>
-          <div class="section-title">我的预测</div>
+          <div class="eyebrow">S16 · 模型生成</div>
+          <div class="section-title">AI 预测</div>
         </div>
         ${modelBadge(state)}
       </div>
@@ -300,17 +373,23 @@
         </div>
       </section>
 
-      <section class="dash-card prediction-card">
-        <div class="section-head">
-          <div>
-            <div class="eyebrow">S16 全球总决赛</div>
-            <div class="section-title">我的预测</div>
+      <div class="prediction-stack">
+        <section class="dash-card manual-card">
+          ${manualCardMarkup(state)}
+        </section>
+
+        <section class="dash-card prediction-card">
+          <div class="section-head">
+            <div>
+              <div class="eyebrow">S16 · 模型生成</div>
+              <div class="section-title">AI 预测</div>
+            </div>
+            ${modelBadge(state)}
           </div>
-        </div>
-        ${modelBadge(state)}
-        <div class="pred-list">${predictionRows(state)}</div>
-        <div class="pred-foot">${predictionFoot(state)}</div>
-      </section>
+          <div class="pred-list">${predictionRows(state)}</div>
+          <div class="pred-foot">${predictionFoot(state)}</div>
+        </section>
+      </div>
 
       <section class="dash-card schedule-card">
         <div class="section-head">
@@ -364,6 +443,19 @@
       post("resize", { height });
     }
   };
+
+  document.addEventListener("change", (event) => {
+    const select = event.target.closest("[data-my-score]");
+    if (!select) return;
+    const matchID = select.dataset.myScore;
+    if (!select.value) {
+      post("clearMyPrediction", { matchID });
+      return;
+    }
+    const [igScore, opponentScore] = select.value.split("-").map(Number);
+    if (!Number.isInteger(igScore) || !Number.isInteger(opponentScore)) return;
+    post("saveMyPrediction", { matchID, igScore, opponentScore });
+  });
 
   document.addEventListener("click", (event) => {
     const actionEl = event.target.closest("[data-action]");

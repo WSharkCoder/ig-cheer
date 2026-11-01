@@ -536,6 +536,139 @@ h1 {
 }
 .pred-refresh:hover { background: rgba(215, 68, 46, .09); color: var(--red); }
 
+/* Manual picks: separate from the AI prediction card. */
+.manual-section {
+  margin-top: 15px;
+  padding-top: 0;
+  border-top: 0;
+}
+.manual-card {
+  padding: 12px 13px 10px;
+  border-radius: 15px;
+  background: var(--paper-2);
+}
+.manual-card .section-head { margin-bottom: 5px; }
+.manual-tag {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  border: 1px solid rgba(62, 138, 77, .18);
+  border-radius: 99px;
+  background: rgba(62, 138, 77, .07);
+  color: var(--green);
+  font: 700 6.5px/1 var(--font-mono);
+  letter-spacing: .04em;
+}
+.manual-list { margin-top: 4px; }
+.manual-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--line);
+}
+.manual-row:first-child { padding-top: 2px; border-top: 0; }
+.manual-main { min-width: 0; flex: 1; }
+.manual-teams {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  color: #2a251f;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  white-space: nowrap;
+}
+.manual-teams .ig { color: var(--red); }
+.manual-teams .versus {
+  color: var(--faint);
+  font: 500 7px/1 var(--font-mono);
+  letter-spacing: .02em;
+}
+.manual-teams .winner {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.manual-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 7px;
+  white-space: nowrap;
+}
+.manual-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+.manual-picker::after {
+  content: "⌄";
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  color: var(--faint);
+  font: 700 10px/1 var(--font-ui);
+  transform: translateY(-58%);
+  pointer-events: none;
+}
+.manual-score {
+  appearance: none;
+  min-width: 82px;
+  padding: 5px 19px 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: 0;
+  background: var(--paper);
+  color: var(--muted);
+  font: 700 9px/1 var(--font-mono);
+  letter-spacing: -.02em;
+  cursor: pointer;
+}
+.manual-score.has-value {
+  border-color: rgba(62, 138, 77, .26);
+  background: rgba(62, 138, 77, .06);
+  color: var(--green);
+}
+.manual-score.has-value.is-loss {
+  border-color: rgba(215, 68, 46, .22);
+  background: rgba(215, 68, 46, .055);
+  color: var(--red-deep);
+}
+.manual-score:focus-visible {
+  border-color: rgba(215, 68, 46, .45);
+  box-shadow: 0 0 0 2px rgba(215, 68, 46, .08);
+}
+.manual-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: 6.5px;
+  letter-spacing: .02em;
+}
+.v2 .dash-card.manual-card { padding: 12px; }
+.v2 .prediction-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  min-width: 0;
+}
+.v2 .manual-card .section-head { margin-bottom: 4px; }
+.v2 .manual-row { padding: 5px 0; gap: 5px; }
+.v2 .manual-teams { font-size: 9px; gap: 3px; }
+.v2 .manual-teams .versus { font-size: 6.5px; }
+.v2 .manual-meta { font-size: 6.5px; margin-top: 2px; }
+.v2 .manual-meta .bo-pill { font-size: 6px; padding: 1px 3px; margin-right: 3px; }
+.v2 .manual-score { min-width: 70px; padding: 4px 16px 4px 6px; font-size: 7.5px; }
+.v2 .manual-picker::after { right: 6px; font-size: 9px; }
+.v2 .manual-foot { font-size: 6px; padding-top: 5px; }
+.v2 .manual-tag { font-size: 6px; padding: 2px 5px; }
+
 .sync {
   display: inline-flex;
   align-items: center;
@@ -676,6 +809,7 @@ h1 {
 .v2 .dashboard {
   display: grid;
   grid-template-columns: 218px minmax(0, 1fr) 218px;
+  align-items: start;
   gap: 13px;
   margin-top: 13px;
 }
