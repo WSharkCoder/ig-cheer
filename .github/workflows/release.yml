@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build app
+        env:
+          SKIP_INSTALL: "1"
+        run: ./build.sh
+
+      - name: Package app
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent "build/IG应援.app" "dist/IG-Cheer-${VERSION}.zip"
+          cd dist
+          shasum -a 256 "IG-Cheer-${VERSION}.zip" > "IG-Cheer-${VERSION}.zip.sha256"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          CHECKSUM="$(cut -d' ' -f1 "dist/IG-Cheer-${VERSION}.zip.sha256")"
+          cat > /tmp/release-notes.md <<NOTES
+          ## IG 应援 ${VERSION}
+
+          TheShy娱乐粉丝制作。
+
+          ### 功能
+
+          - 每日点赞应援、应援日历和连续应援天数
+          - 今日金句轮播与可编辑金句配置
+          - S16 世界赛赛程、官网刷新和 BO1 / BO3 / BO5 赛制
+          - 手动「我的预测」与 AI 比分预测
+          - 纵向 / 横向两种面板布局
+          - 菜单栏常驻，不占用 Dock
+
+          ### 安装
+
+          1. 下载 \`IG-Cheer-${VERSION}.zip\` 并解压
+          2. 将 \`IG应援.app\` 拖入「应用程序」
+          3. 首次打开如被 macOS 拦截，右键 App →「打开」
+
+          ### 校验
+
+          \`\`\`text
+          SHA256: ${CHECKSUM}
+          \`\`\`
+
+          应用为本地构建的 ad-hoc 签名版本；如系统提示无法验证开发者，请在「系统设置 → 隐私与安全性」中允许打开。
+          NOTES
+          gh release create "v${VERSION}" \
+            "dist/IG-Cheer-${VERSION}.zip" \
+            "dist/IG-Cheer-${VERSION}.zip.sha256" \
+            --title "IG 应援 ${VERSION}" \
+            --notes-file /tmp/release-notes.md

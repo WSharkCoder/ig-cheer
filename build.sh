@@ -96,6 +96,12 @@ PLIST
 echo "==> Signing (ad-hoc)"
 codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
 
+if [ "${SKIP_INSTALL:-0}" = "1" ]; then
+  echo "Skipping install (SKIP_INSTALL=1)"
+  echo "Built: $APP"
+  exit 0
+fi
+
 echo "==> Installing to /Applications"
 if pgrep -x IGCheer >/dev/null 2>&1; then
   pkill -x IGCheer || true
