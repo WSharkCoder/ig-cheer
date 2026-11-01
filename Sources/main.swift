@@ -337,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        installStandardEditMenu()
         AppPaths.ensureSupportDirectory()
         QuoteStore.ensureConfigExists()
         currentMode = PanelMode(rawValue: UserDefaults.standard.string(forKey: "panelMode") ?? "")
@@ -352,6 +353,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         handleLaunchArguments()
+    }
+
+    // LSUIElement apps have no visible main menu, but AppKit still routes
+    // standard text shortcuts (Cmd-C/V/X/A/Z) through NSApp.mainMenu.
+    // Without this invisible Edit menu, the settings fields accept typing but
+    // cannot be copied or pasted.
+    private func installStandardEditMenu() {
+        let mainMenu = NSMenu()
+        let appItem = NSMenuItem()
+        appItem.title = "IG 应援"
+        let appMenu = NSMenu(title: "IG 应援")
+        let quit = NSMenuItem(title: "退出 IG 应援",
+                              action: #selector(NSApplication.terminate(_:)),
+                              keyEquivalent: "q")
+        quit.keyEquivalentModifierMask = .command
+        appMenu.addItem(quit)
+        appItem.submenu = appMenu
+        mainMenu.addItem(appItem)
+
+        let editItem = NSMenuItem()
+        editItem.title = "编辑"
+        let editMenu = NSMenu(title: "编辑")
+        let undo = NSMenuItem(title: "撤销", action: NSSelectorFromString("undo:"), keyEquivalent: "z")
+        undo.keyEquivalentModifierMask = .command
+        editMenu.addItem(undo)
+        let redo = NSMenuItem(title: "重做", action: NSSelectorFromString("redo:"), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(redo)
+        editMenu.addItem(.separator())
+        let cut = NSMenuItem(title: "剪切", action: NSSelectorFromString("cut:"), keyEquivalent: "x")
+        cut.keyEquivalentModifierMask = .command
+        editMenu.addItem(cut)
+        let copy = NSMenuItem(title: "复制", action: NSSelectorFromString("copy:"), keyEquivalent: "c")
+        copy.keyEquivalentModifierMask = .command
+        editMenu.addItem(copy)
+        let paste = NSMenuItem(title: "粘贴", action: NSSelectorFromString("paste:"), keyEquivalent: "v")
+        paste.keyEquivalentModifierMask = .command
+        editMenu.addItem(paste)
+        editMenu.addItem(.separator())
+        let selectAll = NSMenuItem(title: "全选", action: NSSelectorFromString("selectAll:"), keyEquivalent: "a")
+        selectAll.keyEquivalentModifierMask = .command
+        editMenu.addItem(selectAll)
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+        NSApp.mainMenu = mainMenu
     }
 
     private func configureDropdown() {
