@@ -74,7 +74,7 @@
 /Applications/IG应援.app
 ```
 
-当前版本：`0.3.8`（build 20）。
+当前版本：`1.0.0`（build 21）。
 
 ## License
 

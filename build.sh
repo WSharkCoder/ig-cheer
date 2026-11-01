@@ -60,9 +60,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.3.8</string>
+    <string>1.0.0</string>
     <key>CFBundleVersion</key>
-    <string>20</string>
+    <string>21</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>
