@@ -862,7 +862,7 @@ enum DisplayFormat {
         let weekdayFormatter = DateFormatter()
         weekdayFormatter.locale = Locale(identifier: "zh_CN")
         weekdayFormatter.timeZone = .current
-        weekdayFormatter.dateFormat = "周EEE"
+        weekdayFormatter.dateFormat = "EEE"
         let timeFormatter = DateFormatter()
         timeFormatter.locale = Locale(identifier: "en_US_POSIX")
         timeFormatter.timeZone = .current
@@ -870,6 +870,35 @@ enum DisplayFormat {
         return (dateFormatter.string(from: date),
                 weekdayFormatter.string(from: date),
                 timeFormatter.string(from: date))
+    }
+
+    /// Human week bucket for the schedule list: 本周 / 下周 / 下下周.
+    /// Weeks start on Monday, matching the calendar layout.
+    static func weekLabel(for date: Date?, now: Date = Date()) -> String {
+        guard let date else { return "--" }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "zh_CN")
+        calendar.timeZone = .current
+        calendar.firstWeekday = 2
+        guard let currentStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start,
+              let targetStart = calendar.dateInterval(of: .weekOfYear, for: date)?.start else {
+            return "--"
+        }
+        let days = calendar.dateComponents([.day], from: currentStart, to: targetStart).day ?? 0
+        let weeks = Int((Double(days) / 7.0).rounded())
+        switch weeks {
+        case 0: return "本周"
+        case 1: return "下周"
+        case 2: return "下下周"
+        case -1: return "上周"
+        case -2: return "上上周"
+        default:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "zh_CN")
+            formatter.timeZone = .current
+            formatter.dateFormat = "EEE"
+            return formatter.string(from: date)
+        }
     }
 
     static func relativeUpdated(_ raw: String) -> String {

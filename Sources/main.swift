@@ -129,8 +129,8 @@ enum PanelMode: String, CaseIterable {
 
     var title: String {
         switch self {
-        case .vertical: return "纵向长卡"
-        case .horizontal: return "横向仪表盘"
+        case .vertical: return "纵向"
+        case .horizontal: return "横向"
         }
     }
 }
@@ -169,6 +169,7 @@ final class DropdownController {
     var onRefreshPredictions: (() -> Void)?
     var onSaveMyPrediction: ((String, Int, Int) -> Void)?
     var onClearMyPrediction: ((String) -> Void)?
+    var onKeepAlive: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     var isVisible: Bool {
@@ -203,6 +204,7 @@ final class DropdownController {
         s.onClearMyPrediction = { [weak self] matchID in
             self?.onClearMyPrediction?(matchID)
         }
+        s.onKeepAlive = { [weak self] in self?.onKeepAlive?() }
         s.onDismiss = { [weak self] in self?.onDismiss?() }
         s.onResize = { [weak self] height in self?.resize(to: height) }
         p.contentView = s
@@ -363,6 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropdown.onClearMyPrediction = { [weak self] matchID in
             self?.clearMyPrediction(matchID: matchID)
         }
+        dropdown.onKeepAlive = { [weak self] in self?.dropdown.keepAlive() }
         dropdown.onDismiss = { [weak self] in self?.dropdown.hide() }
     }
 
@@ -746,7 +749,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             scheduleRows.append(PanelScheduleRow(
                 id: match.id,
                 dateText: parts.date,
-                weekday: parts.weekday,
+                weekday: DisplayFormat.weekLabel(for: match.startDate, now: now),
                 timeText: parts.time,
                 opponent: match.opponent?.code ?? "TBD",
                 stage: DisplayFormat.stage(match.stage),
@@ -1000,6 +1003,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentMode = mode
         let size = PanelMetrics.initialSize(for: mode)
         let surface = PanelWebSurface(frame: NSRect(origin: .zero, size: size))
+        surface.setPreviewMode()
         surface.setState(buildState(toast: nil))
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
                               styleMask: [.borderless],

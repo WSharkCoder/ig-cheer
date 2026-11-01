@@ -286,16 +286,18 @@
       </div>
     </section>
 
-    <section class="block">
-      <div class="section-head">
-        <div>
-          <div class="eyebrow">S16 · 模型生成</div>
-          <div class="section-title">AI 预测</div>
+    <section class="block ai-section">
+      <div class="ai-card">
+        <div class="section-head">
+          <div>
+            <div class="eyebrow">S16 · 模型生成</div>
+            <div class="section-title">AI 预测</div>
+          </div>
+          ${modelBadge(state)}
         </div>
-        ${modelBadge(state)}
+        <div class="pred-list">${predictionRows(state)}</div>
+        <div class="pred-foot">${predictionFoot(state)}</div>
       </div>
-      <div class="pred-list">${predictionRows(state)}</div>
-      <div class="pred-foot">${predictionFoot(state)}</div>
     </section>
 
     <section class="block">
@@ -408,6 +410,22 @@
       <span class="footer-right">${escapeHTML(state.scheduleUpdated)}</span>
     </footer>`;
 
+  const equalizePredictionCards = (state) => {
+    if (state.mode !== "horizontal") return;
+    const cards = [...document.querySelectorAll(".prediction-stack > .dash-card")];
+    if (cards.length < 2) return;
+    cards.forEach((card) => {
+      card.style.minHeight = "";
+      card.style.height = "";
+    });
+    const tallest = Math.ceil(Math.max(...cards.map((card) => card.getBoundingClientRect().height)));
+    cards.forEach((card) => {
+      card.style.minHeight = `${tallest}px`;
+      card.style.height = `${tallest}px`;
+    });
+    window.setTimeout(notifyHeight, 10);
+  };
+
   const render = (state) => {
     currentState = state;
     document.body.dataset.mode = state.mode;
@@ -428,6 +446,13 @@
       toast.textContent = "";
     }
 
+    if (state.mode === "horizontal") {
+      window.setTimeout(() => equalizePredictionCards(state), 60);
+      window.setTimeout(() => equalizePredictionCards(state), 300);
+      if (document.fonts?.ready) {
+        document.fonts.ready.then(() => equalizePredictionCards(state));
+      }
+    }
     window.setTimeout(notifyHeight, 40);
     if (document.fonts?.ready) {
       document.fonts.ready.then(() => window.setTimeout(notifyHeight, 10));
@@ -456,6 +481,15 @@
     if (!Number.isInteger(igScore) || !Number.isInteger(opponentScore)) return;
     post("saveMyPrediction", { matchID, igScore, opponentScore });
   });
+
+  let lastScrollPing = 0;
+  document.addEventListener("scroll", (event) => {
+    if (!event.target || event.target.id !== "panel") return;
+    const now = Date.now();
+    if (now - lastScrollPing < 500) return;
+    lastScrollPing = now;
+    post("keepAlive");
+  }, true);
 
   document.addEventListener("click", (event) => {
     const actionEl = event.target.closest("[data-action]");

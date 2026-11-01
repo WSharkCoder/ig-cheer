@@ -548,6 +548,19 @@ h1 {
   background: var(--paper-2);
 }
 .manual-card .section-head { margin-bottom: 5px; }
+.ai-section {
+  margin-top: 10px;
+  padding-top: 0;
+  border-top: 0;
+}
+.ai-card {
+  padding: 12px 13px 10px;
+  border-radius: 15px;
+  background: var(--paper-2);
+}
+.ai-card .section-head { margin-bottom: 5px; }
+.ai-card .pred-foot { margin-top: 5px; }
+.quote-section + .cta { margin-top: 18px; }
 .manual-tag {
   flex: 0 0 auto;
   padding: 3px 6px;
@@ -651,10 +664,22 @@ h1 {
   font-size: 6.5px;
   letter-spacing: .02em;
 }
-.v2 .dash-card.manual-card { padding: 12px; }
+.v2 .dash-card.manual-card {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+}
+.v2 .dash-card.prediction-card {
+  display: flex;
+  flex-direction: column;
+}
+.v2 .manual-card .manual-foot,
+.v2 .prediction-card .pred-foot { margin-top: auto; }
 .v2 .prediction-stack {
   display: flex;
   flex-direction: column;
+  align-self: stretch;
+  justify-content: space-between;
   gap: 13px;
   min-width: 0;
 }
@@ -811,8 +836,10 @@ h1 {
   grid-template-columns: 218px minmax(0, 1fr) 218px;
   align-items: start;
   gap: 13px;
-  margin-top: 13px;
+  margin-top: 16px;
 }
+.v2 .calendar-card { align-self: stretch; }
+.v2 .schedule-card { align-self: start; }
 .v2 .dash-card {
   min-width: 0;
   padding: 12px;
@@ -1058,6 +1085,15 @@ body[data-mode="horizontal"] { width: 800px; }
 .panel.v2 {
   width: 760px;
   min-height: 462px;
+}
+body[data-mode="vertical"] .panel {
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+body.preview-mode[data-mode="vertical"] .panel {
+  max-height: none;
+  overflow: visible;
 }
 .panel::before { left: var(--tail-x, 50%) !important; }
 ::-webkit-scrollbar { display: none; }

@@ -12,6 +12,7 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     var onRefreshPredictions: (() -> Void)?
     var onSaveMyPrediction: ((String, Int, Int) -> Void)?
     var onClearMyPrediction: ((String) -> Void)?
+    var onKeepAlive: (() -> Void)?
     var onDismiss: (() -> Void)?
     var onResize: ((CGFloat) -> Void)?
 
@@ -20,6 +21,7 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     private var pendingState: PanelState?
     private var pendingTail: CGFloat?
     private var lastStateJSON: String?
+    private var previewMode = false
 
     override init(frame frameRect: NSRect) {
         let configuration = WKWebViewConfiguration()
@@ -71,6 +73,17 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
         applyTail()
     }
 
+    /// Preview captures need the whole card, not the clipped 983pt viewport.
+    func setPreviewMode() {
+        previewMode = true
+        guard loaded else { return }
+        applyPreviewMode()
+    }
+
+    private func applyPreviewMode() {
+        webView.evaluateJavaScript("document.body.classList.add('preview-mode');", completionHandler: nil)
+    }
+
     func snapshot(completion: @escaping (NSImage?) -> Void) {
         let configuration = WKSnapshotConfiguration()
         webView.takeSnapshot(with: configuration) { image, error in
@@ -104,6 +117,7 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
+        if previewMode { applyPreviewMode() }
         applyPendingState()
     }
 
@@ -149,6 +163,8 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
             if let matchID = body["matchID"] as? String {
                 onClearMyPrediction?(matchID)
             }
+        case "keepAlive":
+            onKeepAlive?()
         case "dismiss":
             onDismiss?()
         case "resize":
