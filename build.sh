@@ -20,7 +20,7 @@ xcrun swiftc -O -swift-version 5 \
   "$ROOT/Sources/PanelWebView.swift" \
   "$ROOT/Sources/SettingsView.swift" \
   -o "$BIN" \
-  -framework Cocoa -framework WebKit -framework Security -framework CryptoKit
+  -framework Cocoa -framework WebKit -framework CryptoKit
 
 echo "==> Bundling resources"
 cp "$ROOT/assets/avatar_bust_white.png" "$CONTENTS/Resources/avatar_bust_white.png"
@@ -60,9 +60,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.1</string>
+    <string>0.2.2</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>

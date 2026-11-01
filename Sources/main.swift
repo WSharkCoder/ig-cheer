@@ -781,7 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         右键 / Control-点击：展示模式、模型、赛程与预测
         每日只能点赞应援一次；日历会记录连续天数。
 
-        模型 Key 使用 AES-GCM 加密，主密钥在 macOS 钥匙串中。
+        模型 Key 使用 AES-GCM 加密后写入本地配置；不需要输入 Mac 密码。
         API Key 不会以明文写入配置文件。
 
         为 Invictus Gaming 打 Call！
@@ -861,11 +861,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let cipher = try SecretBox.encrypt("ig-cheer-roundtrip")
                 let plain = try SecretBox.decrypt(cipher)
                 let message = plain == "ig-cheer-roundtrip"
-                    ? "KEYCHAIN_OK ciphertext_prefix=\(cipher.prefix(3))"
-                    : "KEYCHAIN_FAILED"
+                    ? "ENCRYPTION_OK ciphertext_prefix=\(cipher.prefix(3))"
+                    : "ENCRYPTION_FAILED"
                 FileHandle.standardOutput.write((message + "\n").data(using: .utf8)!)
             } catch {
-                FileHandle.standardOutput.write(("KEYCHAIN_FAILED \(error.localizedDescription)\n").data(using: .utf8)!)
+                FileHandle.standardOutput.write(("ENCRYPTION_FAILED \(error.localizedDescription)\n").data(using: .utf8)!)
             }
             NSApp.terminate(nil)
             return

@@ -234,7 +234,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         clearKeyButton.frame = NSRect(x: 24, y: 148, width: 90, height: 20)
         editor.addSubview(clearKeyButton)
 
-        let lockNote = NSTextField(labelWithString: "AES-GCM 加密后写入 models.json；主密钥保存在 macOS 钥匙串，配置文件权限 0600。")
+        let lockNote = NSTextField(labelWithString: "AES-GCM 加密后写入 models.json；本地密钥权限 0600，不读取系统钥匙串。")
         lockNote.font = NSFont.systemFont(ofSize: 9)
         lockNote.textColor = .secondaryLabelColor
         lockNote.frame = NSRect(x: 24, y: 120, width: 490, height: 16)

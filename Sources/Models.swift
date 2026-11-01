@@ -1,7 +1,6 @@
 import Foundation
 import Combine
 import CryptoKit
-import Security
 
 // MARK: - App paths
 
@@ -50,21 +49,23 @@ enum AppClock {
 
 // MARK: - Secret storage
 //
-// The API key ciphertext lives in models.json. The 256-bit AES-GCM master key
-// lives in the macOS Keychain, never in the JSON file. Replacing models.json
-// cannot expose a usable key without Keychain access.
+// The API key ciphertext lives in models.json. A random 256-bit master key
+// lives beside it in .model-key (0600), so saving or reading a Key never
+// triggers a macOS Keychain password prompt. This is local file-level
+// encryption: it protects against plaintext leaking from models.json, not
+// against another process running as the same user.
 
 enum SecretBoxError: LocalizedError {
-    case keychain(OSStatus)
+    case keyFile(String)
     case invalidCiphertext
     case cryptoFailed
 
     var errorDescription: String? {
         switch self {
-        case .keychain(let status):
-            return "无法访问钥匙串（OSStatus \(status)）。API Key 没有被保存。"
+        case .keyFile(let message):
+            return "无法读写本地加密密钥：\(message)"
         case .invalidCiphertext:
-            return "加密后的 Key 格式无效。"
+            return "加密后的 Key 格式无效，请重新填写 API Key。"
         case .cryptoFailed:
             return "加密或解密失败。"
         }
@@ -72,9 +73,12 @@ enum SecretBoxError: LocalizedError {
 }
 
 enum SecretBox {
-    private static let service = "com.wsharkcoder.igcheer.model-keys"
-    private static let account = "master-key-v1"
-    private static let prefix = "v1."
+    private static let prefix = "v2."
+    private static let keyFileName = ".model-key"
+
+    private static var keyURL: URL {
+        AppPaths.supportDirectory.appendingPathComponent(keyFileName)
+    }
 
     static func encrypt(_ plaintext: String) throws -> String {
         let key = try masterKey()
@@ -86,7 +90,9 @@ enum SecretBox {
     }
 
     static func decrypt(_ encoded: String) throws -> String {
-        guard encoded.hasPrefix(prefix) else { throw SecretBoxError.invalidCiphertext }
+        guard encoded.hasPrefix(prefix) else {
+            throw SecretBoxError.invalidCiphertext
+        }
         let base64 = String(encoded.dropFirst(prefix.count))
         guard let data = Data(base64Encoded: base64),
               let box = try? AES.GCM.SealedBox(combined: data),
@@ -103,47 +109,26 @@ enum SecretBox {
         return SymmetricKey(data: data)
     }
 
-    private static func keychainQuery() -> [CFString: Any] {
-        [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account
-        ]
-    }
-
     private static func loadOrCreateKeyData() throws -> Data {
-        var query = keychainQuery()
-        query[kSecReturnData] = true
-        query[kSecMatchLimit] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &item)
-        if status == errSecSuccess, let data = item as? Data {
+        AppPaths.ensureSupportDirectory()
+        let fm = FileManager.default
+        let url = keyURL
+
+        if fm.fileExists(atPath: url.path) {
+            guard let data = try? Data(contentsOf: url), data.count == 32 else {
+                throw SecretBoxError.keyFile("密钥文件损坏，请删除后重新填写 API Key。")
+            }
+            try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
             return data
-        }
-        guard status == errSecItemNotFound else {
-            throw SecretBoxError.keychain(status)
         }
 
         let key = SymmetricKey(size: .bits256)
         let data = key.withUnsafeBytes { Data($0) }
-        var add = keychainQuery()
-        add[kSecValueData] = data
-        add[kSecAttrAccessible] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let addStatus = SecItemAdd(add as CFDictionary, nil)
-        if addStatus == errSecDuplicateItem {
-            // A racing first launch created it; read the winner.
-            var retry = keychainQuery()
-            retry[kSecReturnData] = true
-            retry[kSecMatchLimit] = kSecMatchLimitOne
-            var retryItem: CFTypeRef?
-            let retryStatus = SecItemCopyMatching(retry as CFDictionary, &retryItem)
-            if retryStatus == errSecSuccess, let retryData = retryItem as? Data {
-                return retryData
-            }
-            throw SecretBoxError.keychain(retryStatus)
-        }
-        guard addStatus == errSecSuccess else {
-            throw SecretBoxError.keychain(addStatus)
+        do {
+            try data.write(to: url, options: [.atomic])
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            throw SecretBoxError.keyFile(error.localizedDescription)
         }
         return data
     }
