@@ -17,7 +17,7 @@
 - **应援日历与连续天数**：月历标出已应援日期，显示当前连续应援天数。
 - **S16 大模型比分预测**：读取 IG 的世界赛赛程，调用已配置的 OpenAI 兼容或 Anthropic Messages 模型；面板展示模型型号，只有点击「刷新预测」才请求。
 - **多套模型配置**：可同时保存 DeepSeek、OpenAI、Claude 和本地 OpenAI 兼容服务，随时切换；模型 ID 支持下拉建议、从服务商 `/models` 拉取，也可以手填。
-- **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；不读取系统钥匙串，不会弹 Mac 密码。本地无鉴权服务可以留空 Key。
+- **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；输入框不调用系统安全输入控件，不读取系统钥匙串，不会弹 Mac 密码。本地无鉴权服务可以留空 Key。
 - **官网赛程同步**：附带无 Token 的抓取脚本，从 lolesports.com 公共赛程页提取 IG 比赛。
 - **金句配置**：金句从纯文本文件读取，改完重新打开面板即可生效。
 - **纯菜单栏应用**：`LSUIElement`，不显示 Dock 图标；面板 20 秒自动收起，点空白处立即收起。
@@ -57,7 +57,7 @@
 /Applications/IG应援.app
 ```
 
-首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.2.2`（build 9）。
+首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.2.3`（build 10）。
 
 ## 模型配置与 API Key 安全
 
@@ -69,7 +69,7 @@
 - **API 格式**：`OpenAI 兼容` 或 `Anthropic Messages`。切换格式会自动填入对应的默认 Base URL 和常用模型。
 - **模型标识**：请求体中的 `model`。下拉里是可编辑的建议列表，也可以直接输入任意 ID。
 - **Base URL**：接口根地址，通常以 `/v1` 结尾。
-- **API Key / Token**：可选；保存时加密。
+- **API Key / Token**：可选；保存时加密。输入框是普通文本框，不触发 macOS 的 Passwords 自动填充或钥匙串授权。
 - **设为当前预测模型**：预测时使用这一套配置。
 
 ### 两种 API 格式
@@ -133,6 +133,7 @@ LM Studio、vLLM、llama.cpp server 等只要暴露 OpenAI 兼容的 `/v1` 端�
 - API Key 使用 **AES-GCM** 加密，`models.json` 中只保存密文。
 - 256 位本地主密钥保存在 `~/Library/Application Support/IGCheer/.model-key`，权限 `0600`。
 - **不访问 macOS 钥匙串**，保存或读取 Key 都不会弹系统密码。
+- API Key 输入框是普通 `NSTextField`，不使用 `NSSecureTextField`，因此不会出现 macOS 的 Passwords 自动填充/钥匙串授权菜单。
 - 这是本地文件级加密：防护目标是避免 Key 明文出现在 `models.json`；同一台 Mac 的同一用户仍可读取主密钥。
 - 配置文件权限设置为 `0600`。
 - 支持多套配置并存；切换模型不会覆盖已有 Key。

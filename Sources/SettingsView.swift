@@ -56,7 +56,9 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let nameField = NSTextField()
     private let modelCombo = NSComboBox()
     private let baseURLField = NSTextField()
-    private let keyField = NSSecureTextField()
+    // Deliberately a plain NSTextField: NSSecureTextField triggers the system
+    // Passwords AutoFill menu, which can ask for the macOS login password.
+    private let keyField = NSTextField()
     private let formatPopUp = NSPopUpButton()
     private let activeCheck = NSButton(checkboxWithTitle: "设为当前预测模型", target: nil, action: nil)
     private let titleLabel = NSTextField(labelWithString: "选择一套模型配置")
@@ -210,13 +212,14 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         keyLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
         keyLabel.frame = NSRect(x: 24, y: 229, width: 120, height: 15)
         editor.addSubview(keyLabel)
-        let keyHintLabel = NSTextField(labelWithString: "留空保留现有 Key；远程服务需填写，本地可留空")
+        let keyHintLabel = NSTextField(labelWithString: "留空保留现有 Key；远程服务需填写，本地可留空；不使用系统钥匙串")
         keyHintLabel.font = NSFont.systemFont(ofSize: 9)
         keyHintLabel.textColor = .secondaryLabelColor
-        keyHintLabel.frame = NSRect(x: 145, y: 229, width: 300, height: 15)
+        keyHintLabel.frame = NSRect(x: 145, y: 229, width: 380, height: 15)
         editor.addSubview(keyHintLabel)
 
         keyField.placeholderString = "粘贴 API Key"
+        keyField.isAutomaticTextCompletionEnabled = false
         keyField.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
         keyField.frame = NSRect(x: 24, y: 199, width: 460, height: 25)
         editor.addSubview(keyField)
