@@ -136,16 +136,16 @@ enum PredictionClient {
         // tokens and preventing a model from echoing a truncated UUID.
         let lines = matches.enumerated().map { index, match -> String in
             let opponent = match.opponent?.code ?? "TBD"
-            let bestOf = match.bestOf > 0 ? "BO\(match.bestOf)" : "BO3"
+            let bestOf = [1, 3, 5].contains(match.bestOf) ? match.bestOf : 3
             let date = match.startDate.map { formatter.string(from: $0) } ?? "--"
-            return "\(index)|\(opponent)|\(bestOf)|\(date)"
+            return "\(index)|\(opponent)|BO\(bestOf)|\(date)"
         }.joined(separator: "\n")
 
         let system = """
-        Predict the LoL series score for IG. Input lines: index|opponent|BO|date.
-        Reply with JSON only: {"p":[{"m":0,"s":"2-1","c":64}]}
-        s = IG score-opponent score, valid for BO; c = IG win probability 0-100.
-        No markdown, no explanation.
+        Predict the LoL series score for IG. Input lines: index|opponent|BO|date. BO is 1, 3, or 5.
+        Reply with JSON only: {"p":[{"m":0,"s":"3-1","c":64}]}
+        s = IG score-opponent score, valid for the BO: winner reaches 1/2/3 wins for BO1/3/5.
+        c = IG win probability 0-100. No markdown, no explanation.
         """
         return (system, "IG matches:\n\(lines)")
     }
@@ -206,10 +206,12 @@ enum PredictionClient {
                 intValue(row["c"]) ?? intValue(row["confidence"]) ?? 50))
             guard (0...5).contains(igScore), (0...5).contains(opponentScore),
                   igScore != opponentScore else { return nil }
-            return ScorePrediction(matchID: match.id,
-                                   igScore: igScore,
-                                   opponentScore: opponentScore,
-                                   confidence: confidence)
+            let prediction = ScorePrediction(matchID: match.id,
+                                             igScore: igScore,
+                                             opponentScore: opponentScore,
+                                             confidence: confidence)
+            guard prediction.isValid(for: match.bestOf) else { return nil }
+            return prediction
         }
         guard !predictions.isEmpty else { throw PredictionClientError.noPredictions }
         return predictions

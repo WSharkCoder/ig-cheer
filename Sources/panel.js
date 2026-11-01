@@ -102,6 +102,9 @@
     }
     return state.predictions.map((prediction) => {
       const lost = prediction.igScore < prediction.opponentScore;
+      const bo = prediction.bestOf
+        ? `<span class="bo-pill">BO${escapeHTML(String(prediction.bestOf))}</span>`
+        : "";
       return `
         <div class="pred-row">
           <div class="pred-main">
@@ -110,7 +113,7 @@
               <span class="versus">vs</span>
               <span class="winner">${escapeHTML(prediction.opponent)}</span>
             </div>
-            <div class="pred-meta">${escapeHTML(prediction.stage)} · ${escapeHTML(prediction.dateText)}</div>
+            <div class="pred-meta">${bo}${escapeHTML(prediction.stage)} · ${escapeHTML(prediction.dateText)}</div>
           </div>
           <div class="pred-result">
             <span class="pred-score">${prediction.igScore} : ${prediction.opponentScore}</span>
@@ -214,7 +217,7 @@
       <div class="section-head">
         <div>
           <div class="eyebrow">S16 英雄联盟全球总决赛</div>
-          <div class="section-title">大模型比分预测</div>
+          <div class="section-title">我的预测</div>
         </div>
         ${modelBadge(state)}
       </div>
@@ -301,7 +304,7 @@
         <div class="section-head">
           <div>
             <div class="eyebrow">S16 全球总决赛</div>
-            <div class="section-title">比分预测</div>
+            <div class="section-title">我的预测</div>
           </div>
         </div>
         ${modelBadge(state)}

@@ -703,11 +703,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let model = ModelStore.shared.activeModel
         let cached = PredictionStore.load()
-        let ids = Set(upcoming.map(\.id))
         let cacheUsable = cached != nil
             && cached?.modelID == model?.model
             && (cached?.predictions.isEmpty == false)
-            && ids.allSatisfy { id in cached?.predictions.contains(where: { $0.matchID == id }) == true }
+            && upcoming.allSatisfy { match in
+                guard let prediction = cached?.predictions.first(where: { $0.matchID == match.id }) else {
+                    return false
+                }
+                return prediction.isValid(for: match.bestOf)
+            }
         let predictionSeed = cacheUsable ? (cached?.predictions ?? []) : PredictionStore.sample(
             for: upcoming,
             modelName: model?.name ?? "示例预测"
@@ -721,6 +725,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 matchID: match.id,
                 opponent: match.opponent?.code ?? "TBD",
                 stage: DisplayFormat.stage(match.stage),
+                bestOf: [1, 3, 5].contains(match.bestOf) ? match.bestOf : 3,
                 dateText: parts.date,
                 igScore: prediction.igScore,
                 opponentScore: prediction.opponentScore,

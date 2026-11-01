@@ -66,10 +66,12 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let statusLabel = NSTextField(labelWithString: "")
     private let clearKeyButton = NSButton(title: "清除 Key", target: nil, action: nil)
     private let fetchButton = NSButton(title: "获取模型", target: nil, action: nil)
+    private let testButton = NSButton(title: "测试连接", target: nil, action: nil)
     private let deleteButton = NSButton(title: "−", target: nil, action: nil)
     private var selectedID: String?
     private var isLoading = false
     private var fetchInFlight = false
+    private var testInFlight = false
 
     init(store: ModelStore = .shared) {
         self.store = store
@@ -254,16 +256,25 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         folderButton.frame = NSRect(x: 136, y: 78, width: 126, height: 28)
         editor.addSubview(folderButton)
 
+        testButton.target = self
+        testButton.action = #selector(testConnection)
+        testButton.bezelStyle = .rounded
+        testButton.controlSize = .small
+        testButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        testButton.frame = NSRect(x: 270, y: 78, width: 100, height: 28)
+        testButton.toolTip = "GET {Base URL}/models，只验证连通与鉴权，不发送推理请求，不消耗 Token"
+        editor.addSubview(testButton)
+
         statusLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.lineBreakMode = .byTruncatingTail
-        statusLabel.frame = NSRect(x: 274, y: 84, width: 250, height: 16)
+        statusLabel.frame = NSRect(x: 24, y: 54, width: 500, height: 16)
         editor.addSubview(statusLabel)
 
-        let footnote = NSTextField(labelWithString: "AI 徽章显示「显示名称」；预测请求只在点击「刷新预测」时发出。")
+        let footnote = NSTextField(labelWithString: "AI 徽章显示「显示名称」；预测请求只在点击「刷新预测」时发出；测试连接只请求 /models。")
         footnote.font = NSFont.systemFont(ofSize: 9)
         footnote.textColor = .secondaryLabelColor
-        footnote.frame = NSRect(x: 24, y: 42, width: 500, height: 16)
+        footnote.frame = NSRect(x: 24, y: 28, width: 500, height: 16)
         editor.addSubview(footnote)
     }
 
@@ -359,6 +370,9 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         fetchButton.title = "获取模型"
         fetchButton.isEnabled = true
         fetchInFlight = false
+        testButton.title = "测试连接"
+        testButton.isEnabled = true
+        testInFlight = false
         isLoading = false
         tableView.reloadData()
         deleteButton.isEnabled = true
@@ -382,6 +396,9 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         statusLabel.toolTip = nil
         fetchButton.title = "获取模型"
         fetchButton.isEnabled = false
+        testButton.title = "测试连接"
+        testButton.isEnabled = false
+        testInFlight = false
         isLoading = false
     }
 
@@ -527,16 +544,11 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         draft.model = modelCombo.stringValue
 
         var apiKey: String?
-        let typedKey = keyField.stringValue
-        if !typedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            apiKey = typedKey
-        } else if config.hasKey {
-            do {
-                apiKey = try store.apiKey(for: config)
-            } catch {
-                showError(error, title: "读取加密 Key 失败")
-                return
-            }
+        do {
+            apiKey = try resolvedAPIKey(for: config)
+        } catch {
+            showError(error, title: "读取加密 Key 失败")
+            return
         }
 
         // Do not send an unauthenticated /models request to a remote
@@ -578,6 +590,108 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    @objc private func testConnection() {
+        guard !testInFlight, !fetchInFlight, let id = selectedID,
+              let config = store.models.first(where: { $0.id == id }) else { return }
+        let base = baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else {
+            statusLabel.stringValue = "请先填写 Base URL"
+            statusLabel.toolTip = nil
+            return
+        }
+
+        var draft = config
+        draft.baseURL = base
+        draft.apiFormat = currentFormat
+        draft.model = modelCombo.stringValue
+
+        var apiKey: String?
+        do {
+            apiKey = try resolvedAPIKey(for: config)
+        } catch {
+            showError(error, title: "读取加密 Key 失败")
+            return
+        }
+
+        // The probe is metadata-only. Refuse to hit a hosted endpoint
+        // without a key: it would just produce a confusing 401, with no
+        // useful connectivity information.
+        if apiKey == nil && !Self.isLocalEndpoint(base) {
+            statusLabel.stringValue = "未配置 Key · 无法测试鉴权"
+            statusLabel.toolTip = "远程服务的 /models 需要 API Key；本地服务可以留空。"
+            showAlert(title: "需要 API Key",
+                      message: "远程服务的 /models 需要鉴权。请先在上方填写 API Key；本地服务可以留空。")
+            return
+        }
+
+        testInFlight = true
+        testButton.title = "测试中…"
+        testButton.isEnabled = false
+        fetchButton.isEnabled = false
+        statusLabel.stringValue = "测试连接（GET /models，不消耗 Token）…"
+        statusLabel.toolTip = nil
+
+        ModelCatalogClient.testConnection(model: draft, apiKey: apiKey) { [weak self] result in
+            guard let self else { return }
+            self.testInFlight = false
+            self.testButton.title = "测试连接"
+            self.testButton.isEnabled = true
+            self.fetchButton.isEnabled = true
+            guard self.selectedID == id else { return }
+            switch result {
+            case .success(let probe):
+                let latency = String(format: "%.0f ms", probe.elapsed * 1000)
+                if probe.modelCount > 0 {
+                    self.statusLabel.stringValue = "连接正常 · \(probe.modelCount) 个模型 · \(latency) · 未消耗 Token"
+                } else {
+                    self.statusLabel.stringValue = "连接正常 · /models 无模型 · \(latency) · 未消耗 Token"
+                }
+                self.statusLabel.toolTip = "只发送了 GET /models 元数据请求，没有发送 /chat/completions 或 /messages，不消耗 Token。"
+            case .failure(let error):
+                var alertTitle = "连接测试失败"
+                var alertMessage = error.localizedDescription
+                self.statusLabel.stringValue = "连接测试失败"
+                self.statusLabel.toolTip = error.localizedDescription
+                if let catalog = error as? ModelCatalogError {
+                    switch catalog {
+                    case .http(let status, _):
+                        if status == 401 || status == 403 {
+                            self.statusLabel.stringValue = "鉴权失败 · Key 无效或权限不足"
+                            alertTitle = "鉴权失败"
+                            alertMessage = "服务端拒绝了测试请求（HTTP \(status)）。请检查 API Key 是否正确、是否有该模型的权限，以及 Base URL 是否对应同一个环境。"
+                        } else if status == 404 {
+                            self.statusLabel.stringValue = "接口可达 · /models 不可用"
+                            self.statusLabel.toolTip = "网络可达，但该服务没有 /models；不发送推理请求就无法进一步验证 Key。"
+                            return
+                        } else if status == 429 {
+                            self.statusLabel.stringValue = "请求被限流 · HTTP 429"
+                            alertTitle = "请求被限流"
+                            alertMessage = "服务端返回 HTTP 429。请稍后再测试，或检查账号额度与速率限制。"
+                        } else {
+                            self.statusLabel.stringValue = "接口返回 HTTP \(status)"
+                            alertMessage = "接口返回 HTTP \(status)。请检查 Base URL 是否以 /v1 结尾，以及该地址是否提供 /models。"
+                        }
+                    case .transport(let message):
+                        self.statusLabel.stringValue = "连接失败 · 无法访问"
+                        alertTitle = "无法连接"
+                        alertMessage = "无法连接 \(base)：\(message)"
+                    case .malformedJSON:
+                        self.statusLabel.stringValue = "响应格式异常"
+                        alertTitle = "响应格式异常"
+                        alertMessage = "接口有响应，但 /models 返回的内容不是可解析的模型列表。请确认 Base URL 是否正确。"
+                    case .invalidEndpoint:
+                        self.statusLabel.stringValue = "Base URL 无效"
+                        alertTitle = "Base URL 无效"
+                        alertMessage = "请填写完整的 http(s) 地址，例如 https://api.openai.com/v1。"
+                    case .empty:
+                        break
+                    }
+                }
+                self.showAlert(title: alertTitle, message: alertMessage)
+            }
+        }
+    }
+
     @objc private func openFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([AppPaths.modelsURL])
     }
@@ -590,6 +704,13 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private static func isLocalEndpoint(_ baseURL: String) -> Bool {
         guard let host = URL(string: baseURL)?.host?.lowercased() else { return false }
         return host == "localhost" || host == "127.0.0.1" || host == "::1"
+    }
+
+    private func resolvedAPIKey(for config: ModelConfig) throws -> String? {
+        let typed = keyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !typed.isEmpty { return typed }
+        guard config.hasKey else { return nil }
+        return try store.apiKey(for: config)
     }
 
     private func showAlert(title: String, message: String) {

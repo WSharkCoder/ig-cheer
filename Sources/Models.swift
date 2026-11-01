@@ -639,6 +639,16 @@ struct ScorePrediction: Codable, Identifiable, Equatable {
     var opponentScore: Int
     var confidence: Int
     var id: String { matchID }
+
+    /// A valid series score has the winner at exactly the wins needed for
+    /// the series length, and the loser below that threshold.
+    func isValid(for bestOf: Int) -> Bool {
+        let bestOf = [1, 3, 5].contains(bestOf) ? bestOf : 3
+        let needed = (bestOf + 1) / 2
+        let winner = max(igScore, opponentScore)
+        let loser = min(igScore, opponentScore)
+        return loser >= 0 && winner == needed && loser < needed
+    }
 }
 
 private struct PredictionFile: Codable {
@@ -686,13 +696,15 @@ enum PredictionStore {
     }
 
     static func sample(for matches: [ScheduleMatch], modelName: String) -> [ScorePrediction] {
-        let scores = [(2, 1, 64), (2, 1, 58), (2, 0, 61)]
+        let confidences = [64, 58, 61]
         return matches.prefix(3).enumerated().map { index, match in
-            let score = scores[min(index, scores.count - 1)]
+            let bestOf = [1, 3, 5].contains(match.bestOf) ? match.bestOf : 3
+            let needed = (bestOf + 1) / 2
+            let loser = min(index, needed - 1)
             return ScorePrediction(matchID: match.id,
-                                   igScore: score.0,
-                                   opponentScore: score.1,
-                                   confidence: score.2)
+                                   igScore: needed,
+                                   opponentScore: loser,
+                                   confidence: confidences[min(index, confidences.count - 1)])
         }
     }
 }
@@ -723,6 +735,7 @@ struct PanelPredictionRow: Codable {
     var matchID: String
     var opponent: String
     var stage: String
+    var bestOf: Int
     var dateText: String
     var igScore: Int
     var opponentScore: Int

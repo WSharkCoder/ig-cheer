@@ -483,6 +483,17 @@ h1 {
   font-size: 7.5px;
   line-height: 1;
 }
+.pred-meta .bo-pill {
+  display: inline-block;
+  margin-right: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(215, 68, 46, .10);
+  color: #b44634;
+  font: 700 6.5px/1 var(--font-mono);
+  letter-spacing: .02em;
+  vertical-align: 1px;
+}
 .pred-result { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 .pred-score {
   color: #25211c;
@@ -689,6 +700,7 @@ h1 {
 .v2 .dash-card .pred-teams { font-size: 9.5px; gap: 3px; }
 .v2 .dash-card .pred-teams .versus { font-size: 6.5px; }
 .v2 .dash-card .pred-meta { font-size: 6.5px; margin-top: 2px; }
+.v2 .dash-card .pred-meta .bo-pill { font-size: 6px; padding: 1px 3px; margin-right: 3px; }
 .v2 .dash-card .pred-score { font-size: 10px; }
 .v2 .dash-card .pred-prob { width: 22px; font-size: 7px; }
 .v2 .dash-card .pred-foot { font-size: 6.5px; }
