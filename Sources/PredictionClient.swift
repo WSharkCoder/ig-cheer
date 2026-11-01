@@ -43,35 +43,30 @@ enum PredictionClient {
             return
         }
 
-        let matchLines = matches.map { match -> String in
-            let opponent = match.opponent?.code ?? "TBD"
-            let stage = DisplayFormat.stage(match.stage)
-            let bestOf = match.bestOf > 0 ? "BO\(match.bestOf)" : "BO3"
-            return "- matchId=\(match.id) | IG vs \(opponent) | \(stage) | \(bestOf) | \(match.startTime)"
-        }.joined(separator: "\n")
-
-        let system = """
-        你是英雄联盟（LoL）赛前分析模型。请只基于给定赛程，给出 Invictus Gaming（IG）每场比赛的比分预测。
-        要求：
-        1. IG 的比分在前，对手比分在后，必须符合 BO 赛制的获胜条件。
-        2. confidence 是 IG 获胜概率，0-100 的整数。
-        3. 只输出一个 JSON 对象，不要 Markdown，不要解释。
-        JSON 结构：{"predictions":[{"matchId":"原样返回","igScore":2,"opponentScore":1,"confidence":64}]}
-        """
-        let user = """
-        请预测以下 IG 比赛：
-        \(matchLines)
-        """
-
-        let body: [String: Any] = [
+        let prompt = makePrompt(for: matches)
+        var body: [String: Any] = [
             "model": model.model,
-            "temperature": 0.3,
-            "max_tokens": 900,
-            "messages": [
-                ["role": "system", "content": system],
-                ["role": "user", "content": user]
-            ]
+            "temperature": 0.2,
+            // The expected answer is one short JSON object. Keeping this
+            // bounded prevents a chatty model from spending tokens on prose.
+            "max_tokens": 256
         ]
+
+        switch model.apiFormat {
+        case .openai:
+            body["messages"] = [
+                ["role": "system", "content": prompt.system],
+                ["role": "user", "content": prompt.user]
+            ]
+        case .anthropic:
+            // Anthropic Messages takes the system prompt as a top-level
+            // field and requires max_tokens.
+            body["system"] = prompt.system
+            body["messages"] = [
+                ["role": "user", "content": prompt.user]
+            ]
+        }
+
         guard let payload = try? JSONSerialization.data(withJSONObject: body) else {
             completion(.failure(PredictionClientError.malformedJSON))
             return
@@ -81,9 +76,7 @@ enum PredictionClient {
         request.httpMethod = "POST"
         request.timeoutInterval = 30
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        if let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        }
+        authorize(&request, model: model, apiKey: apiKey)
         request.httpBody = payload
 
         let configuration = URLSessionConfiguration.ephemeral
@@ -119,7 +112,9 @@ enum PredictionClient {
                 return
             }
             do {
-                let predictions = try parsePredictions(data: data, knownMatches: matches)
+                let predictions = try parsePredictions(data: data,
+                                                       format: model.apiFormat,
+                                                       knownMatches: matches)
                 DispatchQueue.main.async {
                     completion(.success(predictions))
                 }
@@ -131,16 +126,48 @@ enum PredictionClient {
         }.resume()
     }
 
-    private static func parsePredictions(data: Data,
-                                         knownMatches: [ScheduleMatch]) throws -> [ScorePrediction] {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let choices = object["choices"] as? [[String: Any]],
-              let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String else {
-            throw PredictionClientError.badResponse("缺少 choices[0].message.content")
-        }
+    private static func makePrompt(for matches: [ScheduleMatch]) -> (system: String, user: String) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = .current
+        formatter.dateFormat = "MM-dd"
 
+        // Indexes replace long provider match ids, saving input and output
+        // tokens and preventing a model from echoing a truncated UUID.
+        let lines = matches.enumerated().map { index, match -> String in
+            let opponent = match.opponent?.code ?? "TBD"
+            let bestOf = match.bestOf > 0 ? "BO\(match.bestOf)" : "BO3"
+            let date = match.startDate.map { formatter.string(from: $0) } ?? "--"
+            return "\(index)|\(opponent)|\(bestOf)|\(date)"
+        }.joined(separator: "\n")
+
+        let system = """
+        Predict the LoL series score for IG. Input lines: index|opponent|BO|date.
+        Reply with JSON only: {"p":[{"m":0,"s":"2-1","c":64}]}
+        s = IG score-opponent score, valid for BO; c = IG win probability 0-100.
+        No markdown, no explanation.
+        """
+        return (system, "IG matches:\n\(lines)")
+    }
+
+    private static func authorize(_ request: inout URLRequest,
+                                  model: ModelConfig,
+                                  apiKey: String?) {
+        guard let key = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !key.isEmpty else { return }
+        switch model.apiFormat {
+        case .openai:
+            request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        case .anthropic:
+            request.setValue(key, forHTTPHeaderField: "x-api-key")
+            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        }
+    }
+
+    private static func parsePredictions(data: Data,
+                                         format: ModelAPIFormat,
+                                         knownMatches: [ScheduleMatch]) throws -> [ScorePrediction] {
+        let content = try responseText(data: data, format: format)
         let cleaned = stripCodeFence(content)
         guard let open = cleaned.firstIndex(of: "{"),
               let close = cleaned.lastIndex(of: "}") else {
@@ -148,27 +175,103 @@ enum PredictionClient {
         }
         let jsonText = String(cleaned[open...close])
         guard let jsonData = jsonText.data(using: .utf8),
-              let payload = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-              let rows = payload["predictions"] as? [[String: Any]] else {
+              let payload = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
             throw PredictionClientError.malformedJSON
         }
 
-        let knownIDs = Set(knownMatches.map(\.id))
+        let rows = (payload["p"] as? [[String: Any]])
+            ?? (payload["predictions"] as? [[String: Any]])
+            ?? []
         let predictions: [ScorePrediction] = rows.compactMap { row in
-            guard let matchID = (row["matchId"] as? String) ?? (row["matchID"] as? String),
-                  knownIDs.contains(matchID) else { return nil }
-            let igScore = intValue(row["igScore"]) ?? intValue(row["ig_score"]) ?? 0
-            let opponentScore = intValue(row["opponentScore"]) ?? intValue(row["opponent_score"]) ?? 0
-            let confidence = min(100, max(0, intValue(row["confidence"]) ?? 50))
+            let match: ScheduleMatch?
+            if let index = intValue(row["m"]), index >= 0, index < knownMatches.count {
+                match = knownMatches[index]
+            } else if let matchID = (row["matchId"] as? String) ?? (row["matchID"] as? String) {
+                match = knownMatches.first(where: { $0.id == matchID })
+            } else {
+                match = nil
+            }
+            guard let match else { return nil }
+
+            let compactScore = parseScore(row["s"])
+            let igScore = compactScore?.0
+                ?? intValue(row["igScore"])
+                ?? intValue(row["ig_score"])
+                ?? 0
+            let opponentScore = compactScore?.1
+                ?? intValue(row["opponentScore"])
+                ?? intValue(row["opponent_score"])
+                ?? 0
+            let confidence = min(100, max(0,
+                intValue(row["c"]) ?? intValue(row["confidence"]) ?? 50))
             guard (0...5).contains(igScore), (0...5).contains(opponentScore),
                   igScore != opponentScore else { return nil }
-            return ScorePrediction(matchID: matchID,
+            return ScorePrediction(matchID: match.id,
                                    igScore: igScore,
                                    opponentScore: opponentScore,
                                    confidence: confidence)
         }
         guard !predictions.isEmpty else { throw PredictionClientError.noPredictions }
         return predictions
+    }
+
+    private static func responseText(data: Data, format: ModelAPIFormat) throws -> String {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw PredictionClientError.malformedJSON
+        }
+
+        if format == .openai,
+           let choices = object["choices"] as? [[String: Any]],
+           let first = choices.first,
+           let message = first["message"] as? [String: Any],
+           let content = text(from: message["content"]) {
+            return content
+        }
+        if format == .anthropic, let content = text(from: object["content"]) {
+            return content
+        }
+
+        // Some compatible gateways use the other shape; accept either one
+        // rather than failing solely because of a format label mismatch.
+        if let choices = object["choices"] as? [[String: Any]],
+           let first = choices.first,
+           let message = first["message"] as? [String: Any],
+           let content = text(from: message["content"]) {
+            return content
+        }
+        if let content = text(from: object["content"]) {
+            return content
+        }
+        throw PredictionClientError.badResponse("缺少响应正文")
+    }
+
+    private static func text(from value: Any?) -> String? {
+        if let string = value as? String { return string }
+        if let blocks = value as? [[String: Any]] {
+            let parts = blocks.compactMap { $0["text"] as? String }
+            return parts.isEmpty ? nil : parts.joined(separator: "\n")
+        }
+        if let block = value as? [String: Any], let text = block["text"] as? String {
+            return text
+        }
+        return nil
+    }
+
+    private static func parseScore(_ value: Any?) -> (Int, Int)? {
+        if let string = value as? String {
+            let parts = string.split(whereSeparator: { $0 == "-" || $0 == ":" })
+                .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+            if parts.count == 2 { return (parts[0], parts[1]) }
+        }
+        if let array = value as? [Any], array.count == 2,
+           let left = intValue(array[0]), let right = intValue(array[1]) {
+            return (left, right)
+        }
+        if let object = value as? [String: Any],
+           let left = intValue(object["ig"]), let right = intValue(object["opponent"]) {
+            return (left, right)
+        }
+        return nil
     }
 
     private static func intValue(_ value: Any?) -> Int? {

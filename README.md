@@ -15,9 +15,9 @@
 
 - **每日点赞应援**：每天只能点一次；按钮完成后变为「今日已应援」。
 - **应援日历与连续天数**：月历标出已应援日期，显示当前连续应援天数。
-- **S16 大模型比分预测**：读取 IG 的世界赛赛程，调用已配置的 OpenAI 兼容模型；面板上展示模型型号。
-- **多套模型配置**：可同时保存 DeepSeek、OpenAI 等兼容接口配置，随时切换当前预测模型。
-- **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；主密钥保存在 macOS 钥匙串。
+- **S16 大模型比分预测**：读取 IG 的世界赛赛程，调用已配置的 OpenAI 兼容或 Anthropic Messages 模型；面板展示模型型号，只有点击「刷新预测」才请求。
+- **多套模型配置**：可同时保存 DeepSeek、OpenAI、Claude 和本地 OpenAI 兼容服务，随时切换；模型 ID 支持下拉建议、从服务商 `/models` 拉取，也可以手填。
+- **API Key 加密存储**：Key 使用 AES-GCM 加密后写入本地配置文件；主密钥保存在 macOS 钥匙串。本地无鉴权服务可以留空 Key。
 - **官网赛程同步**：附带无 Token 的抓取脚本，从 lolesports.com 公共赛程页提取 IG 比赛。
 - **金句配置**：金句从纯文本文件读取，改完重新打开面板即可生效。
 - **纯菜单栏应用**：`LSUIElement`，不显示 Dock 图标；面板 20 秒自动收起，点空白处立即收起。
@@ -41,7 +41,7 @@
 - 当前模型显示在预测卡顶部。
 - 只有一场待预测比赛时，卡片会按内容收紧，不留下大块空白。
 
-右键菜单 →「展示模式」可切换，选择会记住。
+右键菜单 →「展示模式」可切换，选择会记住。比分卡底部的「刷新预测」与右键菜单的「刷新 AI 比分预测」等价；打开面板、切换模型、保存设置或刷新赛程都不会自动请求模型。
 
 ## 安装与构建
 
@@ -57,7 +57,7 @@
 /Applications/IG应援.app
 ```
 
-首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.1.0`（build 6）。
+首次启动没有 Dock 图标，只在菜单栏出现。当前版本：`0.2.0`（build 7）。
 
 ## 模型配置与 API Key 安全
 
@@ -66,10 +66,66 @@
 每套配置包含：
 
 - **显示名称**：面板 AI 徽章上展示的型号名，例如 `DeepSeek V3.2`。
-- **模型标识**：请求体中的 `model`，例如 `deepseek-chat`。
-- **Base URL**：OpenAI 兼容接口地址，通常以 `/v1` 结尾。
+- **API 格式**：`OpenAI 兼容` 或 `Anthropic Messages`。切换格式会自动填入对应的默认 Base URL 和常用模型。
+- **模型标识**：请求体中的 `model`。下拉里是可编辑的建议列表，也可以直接输入任意 ID。
+- **Base URL**：接口根地址，通常以 `/v1` 结尾。
 - **API Key / Token**：可选；保存时加密。
 - **设为当前预测模型**：预测时使用这一套配置。
+
+### 两种 API 格式
+
+| 格式 | 预测请求 | 鉴权 | 模型列表 |
+| --- | --- | --- | --- |
+| OpenAI 兼容 | `POST {BaseURL}/chat/completions` | `Authorization: Bearer …` | `GET {BaseURL}/models` |
+| Anthropic Messages | `POST {BaseURL}/messages` | `x-api-key` + `anthropic-version: 2023-06-01` | `GET {BaseURL}/models?limit=100` |
+
+Anthropic 格式使用顶层 `system` 字段和必填的 `max_tokens`；回复从 `content[].text` 读取。两种格式都强制 JSON 输出，并兼容常见的代码块包裹。
+
+### AI 请求与 Token 策略
+
+预测请求只在用户点击「刷新预测」（或右键「刷新 AI 比分预测」）时发出；打开面板、切换模型、保存设置、刷新赛程都不会请求模型。
+
+每次最多请求 3 场待赛，提示词只保留必要字段：
+
+```text
+system: Predict the LoL series score for IG. Input lines: index|opponent|BO|date.
+         Reply with JSON only: {"p":[{"m":0,"s":"2-1","c":64}]}
+user:   IG matches:
+        0|TES|BO5|11-04
+```
+
+- 用索引代替比赛 UUID，避免模型回显长 ID，也减少输入/输出 token。
+- 日期只发 `MM-dd`，BO 只发 `BO3` / `BO5`，中文赛段与 ISO 时间不再重复发送。
+- 输出上限固定为 `max_tokens: 256`，`temperature: 0.2`；预期只需一个短 JSON。
+- 返回结果按索引回填到本地赛程，界面仍显示完整的对手、阶段和日期。
+
+### 获取模型列表
+
+点「获取模型」后，App 才会请求当前 Base URL 的 `/models`：
+
+- 成功时把返回的 `data[].id` 填入可编辑下拉，按字母排序。
+- 失败时保留内置常用列表，不会阻塞手填。
+- 列表请求与预测请求是分开的，Key 不会因为打开设置窗口而发出。
+
+### 本地模型示例
+
+本地 OpenAI 兼容服务可以直接作为预测模型，Key 留空即可。以 Ollama 为例：
+
+```bash
+ollama serve
+ollama pull qwen2.5:7b
+```
+
+配置：
+
+```text
+API 格式    OpenAI 兼容
+Base URL   http://127.0.0.1:11434/v1
+模型标识    qwen2.5:7b
+API Key    留空
+```
+
+LM Studio、vLLM、llama.cpp server 等只要暴露 OpenAI 兼容的 `/v1` 端点，也可以按同样方式填写。App 识别 `localhost` / `127.0.0.1` / `::1` 为本地端点，允许在没有 Key 的情况下发预测请求。
 
 ### 加密方式
 
@@ -142,7 +198,8 @@ ig-cheer/
 ├── Sources/
 │   ├── main.swift              # 菜单栏、窗口与菜单
 │   ├── Models.swift            # 配置、加密、日历、赛程、预测数据
-│   ├── PredictionClient.swift  # OpenAI 兼容比分预测请求
+│   ├── PredictionClient.swift  # OpenAI / Anthropic 比分预测
+│   ├── ModelCatalogClient.swift  # 从服务商 /models 拉取模型
 │   ├── PanelWebView.swift      # 本地面板 WebView 宿主
 │   ├── SettingsView.swift      # 模型配置窗口
 │   ├── panel.html

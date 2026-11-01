@@ -166,6 +166,7 @@ final class DropdownController {
     var onLike: (() -> Void)?
     var onNextQuote: (() -> Void)?
     var onOpenModels: (() -> Void)?
+    var onRefreshPredictions: (() -> Void)?
     var onDismiss: (() -> Void)?
 
     var isVisible: Bool {
@@ -193,6 +194,7 @@ final class DropdownController {
         s.onLike = { [weak self] in self?.onLike?() }
         s.onNextQuote = { [weak self] in self?.onNextQuote?() }
         s.onOpenModels = { [weak self] in self?.onOpenModels?() }
+        s.onRefreshPredictions = { [weak self] in self?.onRefreshPredictions?() }
         s.onDismiss = { [weak self] in self?.onDismiss?() }
         s.onResize = { [weak self] height in self?.resize(to: height) }
         p.contentView = s
@@ -346,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropdown.onLike = { [weak self] in self?.handleLike() }
         dropdown.onNextQuote = { [weak self] in self?.cycleQuote() }
         dropdown.onOpenModels = { [weak self] in self?.openModelSettings() }
+        dropdown.onRefreshPredictions = { [weak self] in self?.refreshPredictions() }
         dropdown.onDismiss = { [weak self] in self?.dropdown.hide() }
     }
 
@@ -485,7 +488,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         currentSchedule = ScheduleStore.load()
         let state = buildState(toast: nil)
         dropdown.show(anchor: statusItem.button, mode: currentMode, state: state)
-        refreshPredictions(force: false, userInitiated: false)
     }
 
     @objc private func selectMode(_ sender: NSMenuItem) {
@@ -507,8 +509,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         ModelStore.shared.setActive(id)
         buildMenu()
         if dropdown.isVisible {
+            toastText = "已切换模型 · 点击「刷新 AI 比分预测」"
             dropdown.update(state: buildState(toast: toastText))
-            refreshPredictions(force: true, userInitiated: false)
+            clearToast(after: 2.5)
         }
     }
 
@@ -523,7 +526,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.buildMenu()
                 if self.dropdown.isVisible {
                     self.dropdown.update(state: self.buildState(toast: nil))
-                    self.refreshPredictions(force: true, userInitiated: false)
                 }
             }
             modelSettingsWindow = controller
@@ -537,7 +539,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func refreshPredictionAction() {
         if !dropdown.isVisible { cheer() }
-        refreshPredictions(force: true, userInitiated: true)
+        refreshPredictions()
     }
 
     private func refreshSchedule() {
@@ -562,8 +564,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if process.terminationStatus == 0 {
                     self.currentSchedule = ScheduleStore.load()
                     if self.dropdown.isVisible {
-                        self.dropdown.update(state: self.buildState(toast: "赛程已刷新"))
-                        self.clearToast(after: 2.0)
+                        self.dropdown.update(state: self.buildState(toast: "赛程已刷新 · 点击「刷新 AI 比分预测」"))
+                        self.clearToast(after: 2.5)
                     } else {
                         self.cheer()
                     }
@@ -580,45 +582,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func refreshPredictions(force: Bool, userInitiated: Bool) {
+    private func refreshPredictions() {
         guard let model = ModelStore.shared.activeModel else {
-            if userInitiated { showAlert(title: "还没有模型", message: "请先在「模型配置」中添加一套模型。") }
+            showAlert(title: "还没有模型", message: "请先在「模型配置」中添加一套模型。")
             return
         }
         let schedule = currentSchedule ?? ScheduleStore.load()
         let upcoming = ScheduleStore.upcoming(from: schedule, limit: 3)
         guard !upcoming.isEmpty else {
-            if userInitiated { showAlert(title: "暂无待预测赛程", message: "官网赛程里还没有 IG 的下一场比赛。") }
+            showAlert(title: "暂无待预测赛程", message: "官网赛程里还没有 IG 的下一场比赛。")
             return
         }
         let local = Self.isLocalEndpoint(model.baseURL)
-        var apiKey: String?
-        do {
-            apiKey = try ModelStore.shared.apiKey(for: model)
-        } catch {
-            if userInitiated {
+        var apiKey: String? = nil
+        if !local {
+            do {
+                apiKey = try ModelStore.shared.apiKey(for: model)
+            } catch {
                 showAlert(title: "读取加密 Key 失败", message: error.localizedDescription)
+                return
             }
-            return
         }
         guard local || apiKey != nil else {
-            if userInitiated {
-                showAlert(title: "尚未配置 API Key",
-                          message: "右键「模型配置…」填写 Key 后，才能请求真实模型。当前展示示例预测。")
-            }
+            showAlert(title: "尚未配置 API Key",
+                      message: "右键「模型配置…」填写 Key 后，才能请求真实模型。当前展示示例预测。")
             return
         }
-        if predictionRefreshInFlight { return }
-
-        if !force, let cached = PredictionStore.load(),
-           cached.modelID == model.model,
-           cached.isFresh,
-           upcoming.allSatisfy({ match in cached.predictions.contains(where: { $0.matchID == match.id }) }) {
-            dropdown.update(state: buildState(toast: toastText))
+        guard !predictionRefreshInFlight else {
+            if dropdown.isVisible {
+                dropdown.update(state: buildState(toast: "预测请求进行中…"))
+            }
             return
         }
 
         predictionRefreshInFlight = true
+        if dropdown.isVisible {
+            dropdown.update(state: buildState(toast: "正在请求 AI 预测…"))
+        }
         PredictionClient.fetch(model: model, apiKey: apiKey, matches: upcoming) { [weak self] result in
             guard let self else { return }
             self.predictionRefreshInFlight = false
@@ -626,14 +626,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .success(let predictions):
                 PredictionStore.save(predictions, model: model)
                 if self.dropdown.isVisible {
-                    self.dropdown.update(state: self.buildState(toast: "AI 预测已更新"))
+                    self.toastText = "AI 预测已更新"
+                    self.dropdown.update(state: self.buildState(toast: self.toastText))
                     self.clearToast(after: 2.0)
                 }
             case .failure(let error):
                 NSLog("IGCheer prediction error: \(error.localizedDescription)")
-                if userInitiated {
-                    self.showAlert(title: "AI 预测失败", message: error.localizedDescription)
-                }
+                self.showAlert(title: "AI 预测失败", message: error.localizedDescription)
             }
         }
     }
@@ -874,6 +873,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--settings") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.openModelSettings()
+            }
+            return
+        }
+        if args.contains("--refresh-prediction") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                self?.refreshPredictions()
             }
             return
         }

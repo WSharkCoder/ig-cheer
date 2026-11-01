@@ -498,6 +498,10 @@ h1 {
 }
 .pred-prob.loss { color: #a89e8e; font-weight: 600; }
 .pred-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 7px;
   padding-top: 7px;
   border-top: 1px solid var(--line);
@@ -505,6 +509,21 @@ h1 {
   font-size: 7px;
   letter-spacing: .01em;
 }
+.pred-note { min-width: 0; }
+.pred-refresh {
+  appearance: none;
+  flex: 0 0 auto;
+  margin: -3px -5px;
+  padding: 3px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(62, 138, 77, .08);
+  color: var(--green);
+  font: 600 7px/1 var(--font-mono);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.pred-refresh:hover { background: rgba(215, 68, 46, .09); color: var(--red); }
 
 .sync {
   display: inline-flex;

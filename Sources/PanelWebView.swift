@@ -9,6 +9,7 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
     var onLike: (() -> Void)?
     var onNextQuote: (() -> Void)?
     var onOpenModels: (() -> Void)?
+    var onRefreshPredictions: (() -> Void)?
     var onDismiss: (() -> Void)?
     var onResize: ((CGFloat) -> Void)?
 
@@ -134,6 +135,8 @@ final class PanelWebSurface: NSView, WKNavigationDelegate, WKScriptMessageHandle
             onNextQuote?()
         case "openModels":
             onOpenModels?()
+        case "refreshPrediction":
+            onRefreshPredictions?()
         case "dismiss":
             onDismiss?()
         case "resize":

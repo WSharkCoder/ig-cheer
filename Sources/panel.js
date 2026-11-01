@@ -120,9 +120,12 @@
     }).join("");
   };
 
-  const predictionFoot = (state) => state.predictionSample
-    ? `示例预测 · 配置 API Key 后自动更新 · ${escapeHTML(state.modelID || "sample")}`
-    : `模型 ${escapeHTML(state.modelID || state.modelName)} · 预测仅供参考`;
+  const predictionFoot = (state) => {
+    const note = state.predictionSample
+      ? `示例预测 · 点击刷新后生成 · ${escapeHTML(state.modelID || "sample")}`
+      : `模型 ${escapeHTML(state.modelID || state.modelName)} · 预测仅供参考`;
+    return `<span class="pred-note">${note}</span><button class="pred-refresh" type="button" data-action="refresh-prediction">刷新预测</button>`;
+  };
 
   const fixtureRows = (state) => {
     if (!state.schedule.length) {
@@ -368,6 +371,7 @@
       if (action === "like") post("like");
       else if (action === "next-quote") post("nextQuote");
       else if (action === "open-models") post("openModels");
+      else if (action === "refresh-prediction") post("refreshPrediction");
       return;
     }
     if (!event.target.closest("#panel")) post("dismiss");

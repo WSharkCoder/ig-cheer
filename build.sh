@@ -16,6 +16,7 @@ xcrun swiftc -O -swift-version 5 \
   "$ROOT/Sources/main.swift" \
   "$ROOT/Sources/Models.swift" \
   "$ROOT/Sources/PredictionClient.swift" \
+  "$ROOT/Sources/ModelCatalogClient.swift" \
   "$ROOT/Sources/PanelWebView.swift" \
   "$ROOT/Sources/SettingsView.swift" \
   -o "$BIN" \
@@ -59,9 +60,9 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <string>0.2.0</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>LSMinimumSystemVersion</key>

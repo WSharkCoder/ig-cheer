@@ -39,9 +39,10 @@ private final class ModelCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(name: String, model: String, active: Bool) {
+    func configure(name: String, model: String, format: ModelAPIFormat, active: Bool) {
         nameLabel.stringValue = name
-        modelLabel.stringValue = model.isEmpty ? "未填写模型标识" : model
+        let modelText = model.isEmpty ? "未填写模型标识" : model
+        modelLabel.stringValue = "\(modelText)  ·  \(format.shortTitle)"
         activeDot.isHidden = !active
     }
 }
@@ -53,17 +54,20 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
     private let store: ModelStore
     private let tableView = NSTableView()
     private let nameField = NSTextField()
-    private let modelField = NSTextField()
+    private let modelCombo = NSComboBox()
     private let baseURLField = NSTextField()
     private let keyField = NSSecureTextField()
+    private let formatPopUp = NSPopUpButton()
     private let activeCheck = NSButton(checkboxWithTitle: "设为当前预测模型", target: nil, action: nil)
     private let titleLabel = NSTextField(labelWithString: "选择一套模型配置")
     private let keyHint = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "")
     private let clearKeyButton = NSButton(title: "清除 Key", target: nil, action: nil)
+    private let fetchButton = NSButton(title: "获取模型", target: nil, action: nil)
     private let deleteButton = NSButton(title: "−", target: nil, action: nil)
     private var selectedID: String?
     private var isLoading = false
+    private var fetchInFlight = false
 
     init(store: ModelStore = .shared) {
         self.store = store
@@ -162,12 +166,45 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         activeCheck.frame = NSRect(x: 24, y: 440, width: 220, height: 20)
         editor.addSubview(activeCheck)
 
+        let formatLabel = NSTextField(labelWithString: "API 格式")
+        formatLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
+        formatLabel.frame = NSRect(x: 250, y: 441, width: 60, height: 15)
+        editor.addSubview(formatLabel)
+
+        formatPopUp.frame = NSRect(x: 312, y: 436, width: 190, height: 24)
+        formatPopUp.font = NSFont.systemFont(ofSize: 11)
+        formatPopUp.controlSize = .small
+        formatPopUp.addItems(withTitles: ModelAPIFormat.allCases.map(\.title))
+        formatPopUp.target = self
+        formatPopUp.action = #selector(formatChanged)
+        formatPopUp.toolTip = "OpenAI 兼容接口使用 /chat/completions；Anthropic 使用 /v1/messages"
+        editor.addSubview(formatPopUp)
+
         addFieldLabel("显示名称", hint: "面板上展示的模型型号", y: 407, to: editor)
         configureField(nameField, placeholder: "例如 DeepSeek V3.2", y: 379, in: editor)
-        addFieldLabel("模型标识", hint: "请求体里的 model，例如 deepseek-chat", y: 347, to: editor)
-        configureField(modelField, placeholder: "deepseek-chat", y: 319, in: editor)
-        addFieldLabel("Base URL", hint: "OpenAI 兼容接口，通常以 /v1 结尾", y: 287, to: editor)
-        configureField(baseURLField, placeholder: "https://api.deepseek.com/v1", y: 259, in: editor)
+
+        addFieldLabel("模型标识", hint: "可下拉选择，或点「获取模型」请求 /models", y: 347, to: editor)
+        modelCombo.frame = NSRect(x: 24, y: 319, width: 330, height: 25)
+        modelCombo.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        modelCombo.placeholderString = "deepseek-chat"
+        modelCombo.isEditable = true
+        modelCombo.completes = true
+        modelCombo.numberOfVisibleItems = 12
+        modelCombo.usesDataSource = false
+        modelCombo.toolTip = "可手动输入任意模型 ID；点右侧按钮从当前 Base URL 获取列表"
+        editor.addSubview(modelCombo)
+
+        fetchButton.target = self
+        fetchButton.action = #selector(fetchModels)
+        fetchButton.bezelStyle = .rounded
+        fetchButton.controlSize = .small
+        fetchButton.font = NSFont.systemFont(ofSize: 10, weight: .medium)
+        fetchButton.frame = NSRect(x: 362, y: 317, width: 122, height: 27)
+        fetchButton.toolTip = "GET {Base URL}/models；需要时使用当前 Key"
+        editor.addSubview(fetchButton)
+
+        addFieldLabel("Base URL", hint: "OpenAI 兼容或 Anthropic 的 API 根地址，通常以 /v1 结尾", y: 287, to: editor)
+        configureField(baseURLField, placeholder: ModelAPIFormat.openai.defaultBaseURL, y: 259, in: editor)
 
         let keyLabel = NSTextField(labelWithString: "API Key / Token")
         keyLabel.font = NSFont.systemFont(ofSize: 10, weight: .semibold)
@@ -216,10 +253,11 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
 
         statusLabel.font = NSFont.monospacedSystemFont(ofSize: 9, weight: .regular)
         statusLabel.textColor = .secondaryLabelColor
+        statusLabel.lineBreakMode = .byTruncatingTail
         statusLabel.frame = NSRect(x: 274, y: 84, width: 250, height: 16)
         editor.addSubview(statusLabel)
 
-        let footnote = NSTextField(labelWithString: "AI 徽章显示「显示名称」；支持同时保存多套配置，预测时使用标记为当前使用的那一套。")
+        let footnote = NSTextField(labelWithString: "AI 徽章显示「显示名称」；预测请求只在点击「刷新预测」时发出。")
         footnote.font = NSFont.systemFont(ofSize: 9)
         footnote.textColor = .secondaryLabelColor
         footnote.frame = NSRect(x: 24, y: 42, width: 500, height: 16)
@@ -267,12 +305,44 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    private var currentFormat: ModelAPIFormat {
+        let index = formatPopUp.indexOfSelectedItem
+        let formats = ModelAPIFormat.allCases
+        return (0..<formats.count).contains(index) ? formats[index] : .openai
+    }
+
+    private func updateFormatPlaceholders() {
+        let format = currentFormat
+        baseURLField.placeholderString = format.defaultBaseURL
+        modelCombo.placeholderString = format.defaultModel
+    }
+
+    private func setModelChoices(_ ids: [String], preserving current: String) {
+        var seen = Set<String>()
+        var choices = ids.filter { id in
+            let trimmed = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            return !trimmed.isEmpty && seen.insert(trimmed).inserted
+        }
+        if !current.isEmpty && !choices.contains(current) {
+            choices.insert(current, at: 0)
+        }
+        modelCombo.removeAllItems()
+        modelCombo.addItems(withObjectValues: choices)
+        modelCombo.stringValue = current
+    }
+
     private func loadDraft(for config: ModelConfig) {
         isLoading = true
         selectedID = config.id
         titleLabel.stringValue = config.name
         nameField.stringValue = config.name
-        modelField.stringValue = config.model
+        if let index = ModelAPIFormat.allCases.firstIndex(of: config.apiFormat) {
+            formatPopUp.selectItem(at: index)
+        } else {
+            formatPopUp.selectItem(at: 0)
+        }
+        updateFormatPlaceholders()
+        setModelChoices(ModelCatalogClient.suggestions(for: config), preserving: config.model)
         baseURLField.stringValue = config.baseURL
         keyField.stringValue = ""
         keyField.placeholderString = config.hasKey ? "已保存（留空不修改）" : "粘贴 API Key"
@@ -282,21 +352,34 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         activeCheck.state = store.activeModelID == config.id ? .on : .off
         clearKeyButton.isEnabled = config.hasKey
         statusLabel.stringValue = ""
+        statusLabel.toolTip = nil
+        fetchButton.title = "获取模型"
+        fetchButton.isEnabled = true
+        fetchInFlight = false
         isLoading = false
         tableView.reloadData()
         deleteButton.isEnabled = true
     }
 
     private func clearEditor() {
+        isLoading = true
         titleLabel.stringValue = "选择或添加一套模型配置"
         nameField.stringValue = ""
-        modelField.stringValue = ""
+        formatPopUp.selectItem(at: 0)
+        updateFormatPlaceholders()
+        setModelChoices(ModelCatalogClient.suggestions(for: ModelConfig(
+            id: "", name: "", model: "", baseURL: ModelAPIFormat.openai.defaultBaseURL
+        )), preserving: "")
         baseURLField.stringValue = ""
         keyField.stringValue = ""
         keyHint.stringValue = ""
         activeCheck.state = .off
         clearKeyButton.isEnabled = false
         statusLabel.stringValue = ""
+        statusLabel.toolTip = nil
+        fetchButton.title = "获取模型"
+        fetchButton.isEnabled = false
+        isLoading = false
     }
 
     // MARK: - Table
@@ -314,6 +397,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         let config = store.models[row]
         cell.configure(name: config.name,
                        model: config.model,
+                       format: config.apiFormat,
                        active: config.id == store.activeModelID)
         return cell
     }
@@ -362,13 +446,37 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         tableView.reloadData()
     }
 
+    @objc private func formatChanged(_ sender: NSButton) {
+        guard !isLoading else { return }
+        updateFormatPlaceholders()
+        let previousDefaults = ModelAPIFormat.allCases.map(\.defaultBaseURL)
+        let currentBase = baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if currentBase.isEmpty || previousDefaults.contains(currentBase) {
+            baseURLField.stringValue = currentFormat.defaultBaseURL
+        }
+        if modelCombo.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            modelCombo.stringValue = currentFormat.defaultModel
+        }
+        var draft = selectedConfig ?? ModelConfig(
+            id: "", name: nameField.stringValue,
+            model: modelCombo.stringValue, baseURL: baseURLField.stringValue
+        )
+        draft.baseURL = baseURLField.stringValue
+        draft.apiFormat = currentFormat
+        setModelChoices(ModelCatalogClient.suggestions(for: draft),
+                        preserving: modelCombo.stringValue)
+        statusLabel.stringValue = "已切换 API 格式"
+        statusLabel.toolTip = nil
+    }
+
     @objc private func saveModel() {
         guard let id = selectedID else { return }
         do {
             try store.update(id: id,
                              name: nameField.stringValue,
-                             model: modelField.stringValue,
+                             model: modelCombo.stringValue,
                              baseURL: baseURLField.stringValue,
+                             apiFormat: currentFormat,
                              keyDraft: keyField.stringValue.isEmpty ? nil : keyField.stringValue)
             keyField.stringValue = ""
             if let config = store.models.first(where: { $0.id == id }) {
@@ -390,6 +498,7 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
                              name: config.name,
                              model: config.model,
                              baseURL: config.baseURL,
+                             apiFormat: config.apiFormat,
                              keyDraft: "")
             loadDraft(for: store.models.first(where: { $0.id == id }) ?? config)
             tableView.reloadData()
@@ -399,13 +508,72 @@ final class ModelSettingsWindowController: NSWindowController, NSWindowDelegate,
         }
     }
 
+    @objc private func fetchModels() {
+        guard !fetchInFlight, let id = selectedID,
+              let config = store.models.first(where: { $0.id == id }) else { return }
+        let base = baseURLField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty else {
+            statusLabel.stringValue = "请先填写 Base URL"
+            statusLabel.toolTip = nil
+            return
+        }
+
+        var draft = config
+        draft.baseURL = base
+        draft.apiFormat = currentFormat
+        draft.model = modelCombo.stringValue
+
+        var apiKey: String?
+        let typedKey = keyField.stringValue
+        if !typedKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            apiKey = typedKey
+        } else if config.hasKey {
+            do {
+                apiKey = try store.apiKey(for: config)
+            } catch {
+                showError(error, title: "读取加密 Key 失败")
+                return
+            }
+        }
+
+        fetchInFlight = true
+        fetchButton.isEnabled = false
+        fetchButton.title = "获取中…"
+        statusLabel.stringValue = "正在请求 /models…"
+        statusLabel.toolTip = nil
+
+        ModelCatalogClient.fetch(model: draft, apiKey: apiKey) { [weak self] result in
+            guard let self else { return }
+            self.fetchInFlight = false
+            self.fetchButton.title = "获取模型"
+            self.fetchButton.isEnabled = true
+            guard self.selectedID == id else { return }
+            switch result {
+            case .success(let models):
+                let ids = models.map(\.id)
+                self.setModelChoices(ids, preserving: self.modelCombo.stringValue)
+                self.statusLabel.stringValue = "已获取 \(models.count) 个模型"
+                self.statusLabel.toolTip = ids.prefix(12).joined(separator: "\n")
+            case .failure(let error):
+                self.statusLabel.stringValue = "获取失败"
+                self.statusLabel.toolTip = error.localizedDescription
+                self.showError(error, title: "获取模型列表失败")
+            }
+        }
+    }
+
     @objc private func openFolder() {
         NSWorkspace.shared.activateFileViewerSelecting([AppPaths.modelsURL])
     }
 
-    private func showError(_ error: Error) {
+    private var selectedConfig: ModelConfig? {
+        guard let id = selectedID else { return nil }
+        return store.models.first(where: { $0.id == id })
+    }
+
+    private func showError(_ error: Error, title: String = "操作失败") {
         let alert = NSAlert()
-        alert.messageText = "操作失败"
+        alert.messageText = title
         alert.informativeText = error.localizedDescription
         alert.alertStyle = .warning
         alert.runModal()

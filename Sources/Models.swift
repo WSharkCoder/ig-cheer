@@ -151,6 +151,46 @@ enum SecretBox {
 
 // MARK: - Models
 
+enum ModelAPIFormat: String, Codable, CaseIterable {
+    case openai
+    case anthropic
+
+    var title: String {
+        switch self {
+        case .openai: return "OpenAI 兼容"
+        case .anthropic: return "Anthropic Messages"
+        }
+    }
+
+    var shortTitle: String {
+        switch self {
+        case .openai: return "OpenAI"
+        case .anthropic: return "Anthropic"
+        }
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .openai: return "https://api.openai.com/v1"
+        case .anthropic: return "https://api.anthropic.com/v1"
+        }
+    }
+
+    var defaultModel: String {
+        switch self {
+        case .openai: return "gpt-4o-mini"
+        case .anthropic: return "claude-sonnet-4-5"
+        }
+    }
+
+    var chatPath: String {
+        switch self {
+        case .openai: return "/chat/completions"
+        case .anthropic: return "/messages"
+        }
+    }
+}
+
 struct ModelConfig: Codable, Identifiable, Equatable {
     var id: String
     var name: String
@@ -158,24 +198,72 @@ struct ModelConfig: Codable, Identifiable, Equatable {
     var baseURL: String
     var encryptedKey: String?
     var enabled: Bool
+    var apiFormat: ModelAPIFormat
+
+    init(id: String,
+         name: String,
+         model: String,
+         baseURL: String,
+         encryptedKey: String? = nil,
+         enabled: Bool = true,
+         apiFormat: ModelAPIFormat = .openai) {
+        self.id = id
+        self.name = name
+        self.model = model
+        self.baseURL = baseURL
+        self.encryptedKey = encryptedKey
+        self.enabled = enabled
+        self.apiFormat = apiFormat
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, model, baseURL, encryptedKey, enabled, apiFormat
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        model = try container.decode(String.self, forKey: .model)
+        baseURL = try container.decode(String.self, forKey: .baseURL)
+        encryptedKey = try container.decodeIfPresent(String.self, forKey: .encryptedKey)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        // Older models.json files have no apiFormat; they were all
+        // OpenAI-compatible before this field was introduced.
+        apiFormat = try container.decodeIfPresent(ModelAPIFormat.self, forKey: .apiFormat) ?? .openai
+    }
 
     var hasKey: Bool {
         guard let key = encryptedKey else { return false }
         return !key.isEmpty
     }
 
+    /// Trim a pasted full endpoint down to a base URL, then ensure the
+    /// provider's version segment exists exactly once.
+    private var normalizedBase: String {
+        var value = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        for suffix in ["/chat/completions", "/messages", "/models"] where value.hasSuffix(suffix) {
+            value = String(value.dropLast(suffix.count))
+            break
+        }
+        value = value.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        if value.isEmpty { return "" }
+        if value.hasSuffix("/v1") || value.contains("/v1/") {
+            return value
+        }
+        return value + "/v1"
+    }
+
     var endpoint: URL? {
-        let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        var value = trimmed
-        if value.hasSuffix("/chat/completions") {
-            return URL(string: value)
-        }
-        if !value.hasSuffix("/v1") && !value.contains("/v1/") {
-            value = value.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/v1"
-        }
-        value = value.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/chat/completions"
-        return URL(string: value)
+        let base = normalizedBase
+        guard !base.isEmpty else { return nil }
+        return URL(string: base + apiFormat.chatPath)
+    }
+
+    var modelsEndpoint: URL? {
+        let base = normalizedBase
+        guard !base.isEmpty else { return nil }
+        return URL(string: base + "/models")
     }
 }
 
@@ -246,7 +334,8 @@ final class ModelStore: ObservableObject {
                                 model: "",
                                 baseURL: "https://api.openai.com/v1",
                                 encryptedKey: nil,
-                                enabled: true)
+                                enabled: true,
+                                apiFormat: .openai)
         models.append(model)
         save()
         return model
@@ -257,12 +346,14 @@ final class ModelStore: ObservableObject {
                 name: String,
                 model: String,
                 baseURL: String,
+                apiFormat: ModelAPIFormat = .openai,
                 keyDraft: String?) throws {
         guard let index = models.firstIndex(where: { $0.id == id }) else { return }
         var updated = models[index]
         updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
         updated.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.apiFormat = apiFormat
         if updated.name.isEmpty { updated.name = "未命名模型" }
         if let keyDraft {
             if keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -308,13 +399,22 @@ final class ModelStore: ObservableObject {
                     model: "deepseek-chat",
                     baseURL: "https://api.deepseek.com/v1",
                     encryptedKey: nil,
-                    enabled: true),
+                    enabled: true,
+                    apiFormat: .openai),
         ModelConfig(id: "openai",
                     name: "OpenAI GPT-4o mini",
                     model: "gpt-4o-mini",
                     baseURL: "https://api.openai.com/v1",
                     encryptedKey: nil,
-                    enabled: true)
+                    enabled: true,
+                    apiFormat: .openai),
+        ModelConfig(id: "anthropic",
+                    name: "Anthropic Claude",
+                    model: "claude-sonnet-4-5",
+                    baseURL: "https://api.anthropic.com/v1",
+                    encryptedKey: nil,
+                    enabled: true,
+                    apiFormat: .anthropic)
     ]
 }
 
